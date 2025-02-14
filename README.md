@@ -9,13 +9,14 @@ This project is set up to help fine-tune machine learning models and run tasks o
 
 This folder contains scripts that help train models to perform better. It includes:
 
-- **Creating Training and Test Datasets**: Scripts that prepare data for training the models.
-- **Uploading Data to Hugging Face**: Special scripts that send the prepared data to Hugging Face, a platform for sharing machine learning models.
+- **Creating Training and Test Datasets**: Scripts that prepare data for training and testing of the models.
+- **Fine-tune Model**: Scripts that run the fine-tuning for different type of datasets and source model (eg. Llama 3.2 - 3B)  
 - **Merging Model Weights**: The `merge_weights.py` script combines the weights from an existing model with the fine-tuned version to improve performance.
 
 ### `hpc` 🖥️🚀⚡
 
-This folder has the necessary code for running model training and validation on an HPC system. It is divided into two sections:
+This folder has the necessary code for running model training and validation on an HPC system. We used FASRC HPC at Harvard thus the following code is compatible with that.
+It is divided into two sections:
 
 #### `classification` 📊📑🔍
 
@@ -34,9 +35,9 @@ This folder has the necessary code for running model training and validation on 
    - Fine-tune the model to improve its performance.
    - Use `merge_weights.py` to combine the improved weights with the original model.
 
-2. **Running Tasks on the HPC System**
+2. **Running Tasks on the FASRC System**
 
    - Submit classification jobs using SLURM `.sbatch` scripts.
-   - Make sure the Python scripts are set up correctly for smooth execution on the HPC cluster.
+   - Make sure the Python scripts are set up correctly for smooth execution on the FASRC cluster.
 
 For more details, check the comments and explanations inside each script. 📖
