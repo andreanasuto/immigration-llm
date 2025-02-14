@@ -37,6 +37,7 @@ It is divided into two sections:
 
 2. **Running Tasks on the FASRC System**
 
+   - Submit bash command `gpu_tweet_jobs.sh` by selecting 'year' and/or 'month' - eg. `bash gpu_tweet_jobs 2022 1`
    - Submit classification jobs using SLURM `.sbatch` scripts.
    - Make sure the Python scripts are set up correctly for smooth execution on the FASRC cluster.
 
