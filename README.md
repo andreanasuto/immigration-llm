@@ -23,6 +23,14 @@ It is divided into two sections:
 - Contains SLURM (`.sbatch`) scripts for submitting jobs to the HPC system.
 - Includes Python scripts that handle classification tasks on the cluster.
 
+#### `classification USA` 📊📑🔍
+- bash code (`.sh`) to handle multiple sbatch submissions by specifying the year, month, number of jobs to launch, and maximum time for each job.
+Usage: `bash gpu_tweet_usa.sh {YEAR} {MONTH} {NUM_JOBS} {TIME}`
+Example: `bash gpu_tweet_usa.sh {2022} {2} {20} {00:30:00}`
+This command will start classifying datasets for Feb 2022 by launching 20 sbatch/jobs, each with a runtime of 30 minutes.
+- Contains SLURM (`.sbatch`) scripts for submitting jobs to the HPC system.
+- Includes Python scripts that handle classification tasks on the cluster.
+
 #### `validation` ✅🔬📉
 
 - Similar to the classification section but focused on testing and verifying model accuracy.
