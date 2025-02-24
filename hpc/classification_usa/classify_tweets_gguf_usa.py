@@ -68,6 +68,8 @@ def classify_and_save(df, checkpoint_file, output_file, parquet_file):
     start_idx = df.index[df['message_id'] == last_processed_id].tolist()[0] + 1 if last_processed_id in df['message_id'].values else 0
     
     debug_file = "/n/netscratch/cga/Lab/anasuto/immigration/logs_usa/debug_classifications.txt"
+    
+    dataset_length = len(df)  # Store the dataset length before iteration
 
     for idx in range(start_idx, len(df)):
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -82,9 +84,9 @@ def classify_and_save(df, checkpoint_file, output_file, parquet_file):
         with open(debug_file, "a") as f:
             f.write(f"Processed {idx}: Message ID {message_id} -> {classification}\n")
     
-    if idx == len(df) - 1:
-        with open(FILES_COMPLETED_LOG, "a") as log_file:
-            log_file.write(f"{parquet_file}\n")
+        if idx == dataset_length - 1:
+            with open(FILES_COMPLETED_LOG, "a") as log_file:
+                log_file.write(f"{parquet_file}\n")
 
 if len(sys.argv) < 2:
     print("Usage: python gpu_process_tweets.py <parquet_file>")

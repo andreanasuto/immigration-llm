@@ -14,7 +14,7 @@ FILES_COMPLETED_LOG="${LOG_DIR}/files_complete_log.txt"
 STDOUT_DIR="${LOG_DIR}/tweets_stdout"
 STDERR_DIR="${LOG_DIR}/tweets_stderr"
 
-# Ensure the log directories exist
+# Ensure log directories exist
 mkdir -p "${LOG_DIR}" "${STDOUT_DIR}" "${STDERR_DIR}"
 
 # Ensure the completed log file exists
@@ -33,7 +33,13 @@ fi
 
 echo "Starting job submission for year: $YEAR_TO_PROCESS, month: ${MONTH_TO_PROCESS:-all}, num_jobs: $NUM_JOBS, time_limit: $TIME_LIMIT"
 
-# Determine the files to process
+# Load completed files into an associative array for fast lookup
+declare -A COMPLETED_FILES
+while IFS= read -r line; do
+    COMPLETED_FILES["$line"]=1
+done < "$FILES_COMPLETED_LOG"
+
+# Determine files to process
 declare -a FILES
 if [[ -z "$MONTH_TO_PROCESS" ]]; then
     mapfile -t FILES < <(find "${TWEET_DIR}/${YEAR_TO_PROCESS}" -type f -name "${YEAR_TO_PROCESS}_*-tl_2021_*_tabblock20.parquet" | sort)
@@ -47,26 +53,34 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
     exit 1
 fi
 
+# Filter out completed files before job submission
+declare -a FILES_TO_PROCESS
+for FILE in "${FILES[@]}"; do
+    if [[ -z "${COMPLETED_FILES[$FILE]}" ]]; then
+        FILES_TO_PROCESS+=("$FILE")
+    else
+        echo "Skipping completed file: $FILE"
+    fi
+done
+
+# Ensure there are files left to process
+if [[ ${#FILES_TO_PROCESS[@]} -eq 0 ]]; then
+    echo "All files for the selected year/month have already been processed. Exiting."
+    exit 0
+fi
+
 # Counter for jobs submitted
 JOB_COUNT=0
 
+# Loop through remaining files and submit jobs
+for FILE in "${FILES_TO_PROCESS[@]}"; do
+    BASENAME=$(basename "$FILE")
 
-
-# Loop through the determined files and submit jobs
-for FILE in "${FILES[@]}"; do
-    BASENAME=$(basename ${FILE})
-    
-    # Check if the file is already in the completed log
-    if grep -Fxq "$BASENAME" "$FILES_COMPLETED_LOG"; then
-        echo "${BASENAME} has already been processed. Skipping."
-        continue
-    fi
-    
     # Print filename as a progress indicator
     echo "Submitting job for ${BASENAME}"
 
-    # Submit the SLURM job for each parquet file and capture the job ID
-    JOB_ID=$(sbatch --requeue --time=${TIME_LIMIT} --output=${STDOUT_DIR}/${BASENAME}.stdout.txt --error=${STDERR_DIR}/${BASENAME}.stderr.txt ${SBATCH_SCRIPT} ${FILE} | awk '{print $4}')
+    # Submit the SLURM job and capture the job ID
+    JOB_ID=$(sbatch --requeue --time=${TIME_LIMIT} --output=${STDOUT_DIR}/${BASENAME}.stdout.txt --error=${STDERR_DIR}/${BASENAME}.stderr.txt ${SBATCH_SCRIPT} "${FILE}" | awk '{print $4}')
     
     echo "Current job id: ${JOB_ID}"
     
@@ -79,5 +93,4 @@ for FILE in "${FILES[@]}"; do
     
     # Sleep briefly to be kind to the scheduler
     sleep 1
-
 done
