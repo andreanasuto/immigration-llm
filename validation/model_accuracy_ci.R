@@ -5,49 +5,111 @@ library(dplyr)
 library(tidyr)
 
 # define base directories
-base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/test_dataset"
-base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/train_dataset"
+base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/test_dataset_translation"
+base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/train_dataset_translation"
 output_dir <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/output/model_performances"
 
 # Defines which model type to include:
 # "ALL" -> Includes all models
 # "F16" -> Excludes models containing "-Q4-K-M" (keeps only floating point 16-bit models)
 # "4bit" -> Includes only models containing "-Q4-K-M" (keeps only 4-bit quantized models)
-model_type <- "F16" 
+model_type <- "4bit"
+
+# set to TRUE if translated datasets are considered
+translation = TRUE
 
 # Language filter:
 # TRUE -> Keeps only English, Spanish, and Multilanguage datasets
 # FALSE -> Includes all available languages
-dataset <- "Train"
+dataset <- "Test"
 
 # set language filter (TRUE to exclude all except English, Spanish, and Multilanguage)
 filter_languages <- FALSE 
 
-# mapping language codes to full names
-language_map <- list(
+# Define full mapping
+full_language_map <- list(
   "mig-ar" = "Arabic",
+  "mig-ar-L3" = "Arabic",
   "mig-es" = "Spanish",
+  "mig-es-L3" = "Spanish",
   "mig-en" = "English",
+  "mig-en-L3" = "English",
   "mig-pt" = "Portuguese",
+  "mig-pt-L3" = "Portuguese",
   "mig-fr" = "French",
+  "mig-fr-L3" = "French",
   "mig-it" = "Italian",
+  "mig-it-L3" = "Italian",
   "mig-de" = "German",
+  "mig-de-L3" = "German",
   "mig-hi" = "Hindi",
+  "mig-hi-L3" = "Hindi",
   "mig-en-es" = "Eng-Spa",
+  "mig-en-es-L3" = "Eng-Spa",
   "mig-multi" = "Multi",
+  "mig-multi-L3" = "Multi",
   "mig-hu" = "Hungarian",
-  "mig-in" = "Indonesia",
+  "mig-hu-L3" = "Hungarian",
+  "mig-in" = "Indonesian",
+  "mig-in-L3" = "Indonesian",
   "mig-es-translation" = "Spanish Translation",
-  "mig-tr" = "Turkish"
+  "mig-es-translation-L3" = "Spanish Translation",
+  "mig-tr" = "Turkish",
+  "mig-tr-L3" = "Turkish",
+  "mig-pl" = "Polish",
+  "mig-pl-L3" = "Polish"
 )
 
-# function to extract model and dataset from filename
+# Define mapping for "Full" dataset (subset)
+if (dataset == "Full") {
+  language_map <- list(
+    "mig-ar" = "Arabic",
+    "mig-ar-L3" = "Arabic",
+    "mig-es" = "Spanish",
+    "mig-es-L3" = "Spanish",
+    "mig-pt" = "Portuguese",
+    "mig-pt-L3" = "Portuguese",
+    "mig-fr" = "French",
+    "mig-fr-L3" = "French",
+    "mig-it" = "Italian",
+    "mig-it-L3" = "Italian",
+    "mig-de" = "German",
+    "mig-de-L3" = "German",
+    "mig-hi" = "Hindi",
+    "mig-hi-L3" = "Hindi",
+    "mig-hu" = "Hungarian",
+    "mig-hu-L3" = "Hungarian",
+    "mig-in" = "Indonesian",
+    "mig-in-L3" = "Indonesian",
+    "mig-tr" = "Turkish",
+    "mig-tr-L3" = "Turkish",
+    "mig-pl" = "Polish",
+    "mig-pl-L3" = "Polish"
+  )
+} else {
+  language_map <- full_language_map  # Include all languages
+}
+
+# Function to extract model and dataset from filename, preserving translation if present
 extract_model_dataset <- function(filename) {
-  filename <- gsub(".csv", "", filename) 
+  filename <- gsub(".csv", "", filename)
   parts <- unlist(strsplit(filename, "_"))
-  model <- paste(parts[1:3], collapse = "-") 
-  dataset_code <- parts[length(parts)-1] 
-  dataset <- ifelse(dataset_code %in% names(language_map), language_map[[dataset_code]], dataset_code) 
+  
+  model_end <- max(grep("llama", parts))  # Identify last occurrence of "llama"
+  dataset_start <- min(grep("mig-", parts))  # Identify first occurrence of "mig-"
+  
+  model <- paste(parts[1:model_end], collapse = "-")  # Extract model name
+  
+  # Check if translation is in the filename and append it to the model name
+  if (any(grepl("translation", parts))) {
+    model <- paste0(model, "-translation")
+  }
+  
+  dataset_code <- parts[dataset_start]  # Extract dataset code
+  #print(dataset_code)
+  
+  dataset <- ifelse(dataset_code %in% names(language_map), language_map[[dataset_code]], dataset_code)
+  
   return(data.frame(Model = model, Dataset = dataset, stringsAsFactors = FALSE))
 }
 
@@ -84,9 +146,9 @@ if (dataset == "Train" || dataset == "both") {
 
 # apply model type filter
 if (model_type == "F16") {
-  accuracy_data <- accuracy_data %>% filter(!grepl("Q4-K-M", Model))
+  accuracy_data <- accuracy_data %>% filter(!grepl("Q4", Model))
 } else if (model_type == "4bit") {
-  accuracy_data <- accuracy_data %>% filter(grepl("Q4-K-M", Model))
+  accuracy_data <- accuracy_data %>% filter(grepl("Q4", Model))
 }
 
 # remove models with "full" in their name before renaming
@@ -102,19 +164,22 @@ accuracy_data <- accuracy_data %>%
 
 # rename models after filtering
 model_map <- function(model) {
-  if (grepl("llama-32-3B-en-es", model)) {
-    return("English-Spanish")
+  if (grepl("llama-32-3B-en-Q4-translation", model)) {
+    return("English-Translation")
   } else if (grepl("llama-32-3B-multi", model)) {
     return("Multilanguage")
   } else if (grepl("llama-32-3B-es", model)) {
     return("Spanish")
   } else if (grepl("llama-32-3B-en", model)) {
     return("English")
+  } else if (grepl("llama-32-3B-en-es", model)) {
+    return("English-Translation")
   } else {
     return(model)
   }
 }
 
+# apply model name to dataset
 accuracy_data$Model <- sapply(accuracy_data$Model, model_map)
 
 # apply language filter
@@ -126,13 +191,17 @@ if (filter_languages) {
 accuracy_table <- accuracy_data %>%
   pivot_wider(names_from = Dataset, values_from = c(Accuracy_Lower, Accuracy_Upper))
 
+# exclude specific datasets
+excluded_datasets <- c("English", "Eng-Spa", "Spanish Translation", "Multi")
+accuracy_data <- accuracy_data %>% filter(!Dataset %in% excluded_datasets)
+
 # generate dynamic output filename
 filter_status <- ifelse(filter_languages, "main_languages", "all_languages")
-output_filename <- paste0("accuracy_", dataset, "_", model_type, "_", filter_status, ".csv")
+output_filename <- paste0("accuracy_", dataset, "_", model_type, "_", filter_status, ifelse(translation, "_translation", ""), ".csv")
 output_path_csv <- file.path(output_dir, output_filename)
 
 # dynamic title for the chart
-chart_title <- paste("Accuracy Confidence Intervals for", dataset, "Dataset")
+chart_title <- paste0("Accuracy Confidence Intervals for", dataset, "Dataset")
 
 # function to create accuracy confidence interval plots
 plot_accuracy_intervals <- function(data, title) {
@@ -155,7 +224,7 @@ plot_accuracy_intervals <- function(data, title) {
 }
 
 # save results
-write.csv(accuracy_table, output_path_csv, row.names = FALSE)
+#write.csv(accuracy_table, output_path_csv, row.names = FALSE)
 
 # create and display the plot
 plot <- plot_accuracy_intervals(accuracy_data, chart_title)

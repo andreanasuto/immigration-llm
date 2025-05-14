@@ -1,0 +1,375 @@
+---
+title: "modelling_llm_performances"
+author: "Andrea Nasuto"
+date: "2025-04-08"
+output: html_document
+---
+
+Build a model to assess the performance of a series of LLMs across multiple languages, translations, test/train dataset
+
+The dataset to perform this should have this structure. All variables should be factor/characters:
+
+ID | Model | Language | Translation | Test/Train | Correct
+100100 | FT-Multi | IT | 0 | Train | 1
+100100 | FT-EN | IT | 1 | Test | 0
+100100 | FT-EN-ES | IT | 1 | Train | 1
+120300 | LLM2 | EN | EN | Train | 1
+...
+
+
+```{r}
+# Set the option to avoid scientific notation
+options(scipen = 999)
+```
+
+```{r}
+# load libraries
+library(dplyr)
+library(readr)
+library(stringr)
+library(caret)
+library(readxl)
+library(pROC)
+```
+
+```{r}
+# dataset paths
+base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/test_dataset_raw"
+base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/train_dataset_raw"
+
+output_dir <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/output/model_performances"
+
+path_translation_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test"
+
+path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train"
+
+#path_translation_checked_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test/"
+
+#path_translation_checked_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train/"
+```
+
+```{r}
+# Define dataset directories
+dirs <- list(
+  list(path = base_path_train, type = "Train"),
+  list(path = base_path_test, type = "Test"),
+  list(path = path_translation_train, type = "Train"),
+  list(path = path_translation_test, type = "Test")
+)
+
+# Get all file paths for processing
+get_all_files <- function(dirs) {
+  all_files <- list()
+  for (dir in dirs) {
+    if (!is.character(dir$path) || length(dir$path) != 1) {
+      stop("Each dir in 'dirs' must contain a character path. Found: ", dir$path)
+    }
+
+    # List .csv and .xlsx files
+    files <- list.files(dir$path, full.names = TRUE, pattern = "\\.(csv|xlsx)$")
+
+    # Exclude files with 'translation' in the name for base_path_train and base_path_test
+    if (dir$path %in% c(base_path_train, base_path_test)) {
+      files <- files[!grepl("translation", basename(files), ignore.case = TRUE)]
+    }
+    
+    # Exclude files with 'full' in the name
+    files <- files[!grepl("full", basename(files), ignore.case = TRUE)]
+
+    for (f in files) {
+      all_files[[length(all_files) + 1]] <- list(file = f, type = dir$type)
+    }
+  }
+  return(all_files)
+}
+```
+
+```{r}
+extract_model_dataset <- function(filename) {
+  filename <- gsub(".csv", "", filename)
+  parts <- unlist(strsplit(filename, "_"))
+  
+  model_end <- max(grep("llama", parts))
+  dataset_start <- min(grep("mig-", parts))
+  
+  model <- paste(parts[1:model_end], collapse = "-")
+  
+  dataset_code <- parts[dataset_start]
+  dataset <- ifelse(dataset_code %in% names(language_map), language_map[[dataset_code]], dataset_code)
+  
+  return(data.frame(Model = model, Language = dataset, stringsAsFactors = FALSE))
+}
+```
+
+
+```{r}
+# language mapping
+language_map <- list(
+  "mig-ar" = "Arabic",
+  "mig-ar-L3" = "Arabic",
+  "mig-es" = "Spanish",
+  "mig-es-L3" = "Spanish",
+  "mig-en" = "English",
+  "mig-en-L3" = "English",
+  "mig-pt" = "Portuguese",
+  "mig-pt-L3" = "Portuguese",
+  "mig-fr" = "French",
+  "mig-fr-L3" = "French",
+  "mig-it" = "Italian",
+  "mig-it-L3" = "Italian",
+  "mig-de" = "German",
+  "mig-de-L3" = "German",
+  "mig-hi" = "Hindi",
+  "mig-hi-L3" = "Hindi",
+  "mig-en-es" = "Eng-Spa",
+  "mig-en-es-L3" = "Eng-Spa",
+  "mig-multi" = "Multi",
+  "mig-multi-L3" = "Multi",
+  "mig-hu" = "Hungarian",
+  "mig-hu-L3" = "Hungarian",
+  "mig-in" = "Indonesian",
+  "mig-in-L3" = "Indonesian",
+  "mig-es-translation" = "Spanish Translation",
+  "mig-es-translation-L3" = "Spanish Translation",
+  "mig-tr" = "Turkish",
+  "mig-tr-L3" = "Turkish",
+  "mig-pl" = "Polish",
+  "mig-pl-L3" = "Polish"
+)
+```
+
+```{r}
+# Helper function to read and process files
+process_file <- function(file_path, split_type) {
+  # Skip files with "full" or "es-translation"
+  if (grepl("full", basename(file_path)) || grepl("es-translation", basename(file_path))) {
+    return(NULL)
+  }
+  
+  # Skip files that don't contain "llama-32-3B"
+  if (!grepl("llama-32-3B", basename(file_path))) {
+    return(NULL)
+  }
+  
+  # Read the file based on its extension (CSV or Excel)
+  file_extension <- tools::file_ext(file_path)
+  if (file_extension == "csv") {
+    df <- read_csv(file_path, col_types = cols(.default = "c"))
+  } else if (file_extension %in% c("xlsx", "xls")) {
+    df <- read_excel(file_path)
+  } else {
+    return(NULL)  # Skip unsupported file types
+  }
+  
+  # If the data frame is empty or null, return NULL
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+
+  # Extract model and language information from filename
+  meta <- extract_model_dataset(basename(file_path))
+
+# Set Translation value based on the `translation_check` column in the dataset
+  if ("translation_check" %in% colnames(df)) {
+    df$TranslationQuality <- ifelse(df$translation_check == 1, 'Good', 'Bad')
+    df$Translation <- 1
+    #print(paste("Processed translation_checked file:", file_path))
+  } else if (startsWith(file_path, path_translation_train) || startsWith(file_path, path_translation_test)) {
+    # If file is from path_translation_train or path_translation_test, set Translation to 1
+    df$Translation <- 1
+    df$TranslationQuality <- 'Unknown'
+  } else {
+    # Otherwise, set Translation to 0
+    df$Translation <- 0
+    df$TranslationQuality <- 'Not Translated'
+  }
+  
+  # Process the dataset
+  df_processed <- df %>%
+    mutate(
+      Model = meta$Model,
+      Language = meta$Language,
+      Train_Test = split_type,
+      Correct = ifelse(label_llama == label, 1, 0),
+      file_path = file_path
+    ) %>%
+    select(message_id, Model, Language, Translation, TranslationQuality, Train_Test, Correct, label, label_llama, plaintext, file_path)
+
+  return(df_processed)
+}
+```
+
+```{r}
+assign_new_ids <- function(df) {
+  df %>%
+    group_by(plaintext) %>%
+    mutate(newId = cur_group_id()) %>%
+    ungroup()
+}
+```
+
+### Create dataset
+
+```{r}
+# Combine the processed data from all files
+all_files <- get_all_files(dirs)
+list_of_processed_files <- lapply(all_files, function(file_info) {
+  process_file(file_info$file, file_info$type)
+})
+```
+
+```{r}
+# create dataset
+df <- do.call(rbind, Filter(Negate(is.null), list_of_processed_files))
+```
+
+```{r}
+# assign new ID
+df <- assign_new_ids(df)
+```
+
+```{r}
+# include only quantized at 4bit models
+df <- df %>%
+  filter(grepl("llama-32-3B", Model) & grepl("Q4", Model))
+```
+
+```{r}
+# remove duplicate - each observation should have a unique pair of newId and filepath
+df <- df %>%
+  distinct(file_path, newId, .keep_all = TRUE) 
+```
+
+```{r}
+# rename models after filtering
+model_map <- function(model) {
+  if (grepl("llama-32-3B-en-Q4-translation", model)) {
+    return("English-Translation")
+  } else if (grepl("llama-32-3B-en-es", model)) {
+    return("English-Spanish")
+  } else if (grepl("llama-32-3B-multi", model)) {
+    return("Multilanguage")
+  } else if (grepl("llama-32-3B-es", model)) {
+    return("Spanish")
+  } else if (grepl("llama-32-3B-en", model)) {
+    return("English")
+  } else {
+    return(model)
+  }
+}
+```
+
+
+```{r}
+# Rename models after filtering in df
+df$Model <- sapply(df$Model, model_map)
+```
+
+```{r}
+# remove values where Language is Multi
+df <- df %>%
+  filter(!(Language %in% c("Multi", "Eng-Spa")))
+```
+
+```{r}
+# remove all observation where label is NA
+df <- df %>%
+  filter(!is.na(label))
+```
+
+```{r}
+# Ensure all variables are factors (if needed)
+df <- df %>%
+  mutate(
+    message_id = as.character(message_id),
+    Model = as.factor(Model),
+    Language = as.factor(Language),
+    Train_Test = as.factor(Train_Test),
+    Translation = as.factor(Translation),
+    TranslationQuality = as.factor(TranslationQuality),
+    Correct = as.factor(Correct)
+  )
+```
+
+### Checks
+```{r}
+# check if there are NAs in df
+na_count <- sapply(df, function(x) sum(is.na(x)))
+print(na_count)
+
+# check how many correct values are in Correct
+table(df$Correct)
+```
+
+```{r}
+# count number of obs per language
+df %>%
+  count(Language, name = "n_observations") %>%
+  arrange(desc(n_observations))
+
+table(df$Language)
+```
+```{r}
+# count the number of obs with Translation == 2
+translation_count <- df %>%
+  filter(TranslationQuality == 'Good') %>%
+  group_by(Model, Language) %>%
+  summarise(count = n())
+translation_count
+```
+
+## Model
+```{r}
+# Set reference levels for the factors
+df$Model <- relevel(df$Model, ref = "English") #llama-32-3B-en-Q4 - all the models are 4bit
+df$Language <- relevel(df$Language, ref = "English")
+df$Train_Test <- relevel(df$Train_Test, ref = "Train")
+df$label <- factor(df$label)
+df$label <- relevel(df$label, ref = "neutral")
+df$TranslationQuality <- factor(df$TranslationQuality)
+df$TranslationQuality <- relevel(df$TranslationQuality, ref = "Not Translated") # Not Translated
+df$Translation <- factor(df$Translation)
+
+# Fit the logistic regression model
+logit_model <- glm(Correct ~ Model + Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+                   data = df, 
+                   family = binomial())
+
+# Summarize the model
+summary(logit_model)
+```
+
+```{r}
+# Fit the logistic regression model
+logit_model_2 <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+                   data = df, 
+                   family = binomial())
+
+# Summarize the model
+summary(logit_model_2)
+```
+
+##### Random Forest
+```{r}
+# Load the package
+library(randomForest)
+
+# Fit a random forest model
+#rf_model <- randomForest(Correct ~ Model + Language + Train_Test + TranslationQuality + label, 
+#                         data = df, 
+#                         importance = TRUE, 
+#                         ntree = 500)
+
+# Summarize the random forest model
+#print(rf_model)
+
+# Plot the importance of the variables
+#importance(rf_model)  # This will show the importance of each variable
+#varImpPlot(rf_model)  # This will generate a plot showing the importance of each variable
+```
+```{r}
+library(rpart)
+library(rpart.plot)
+tree <- rpart(Correct ~ Model + Language + Train_Test + TranslationQuality + label, # add TrainSize
+                         data = df)
+rpart.plot(tree, yesno = 2)
+```
+
