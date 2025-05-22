@@ -30,25 +30,26 @@ library(stringr)
 library(caret)
 library(readxl)
 library(pROC)
+library(rpart)
+library(rpart.plot)
 ```
 
 ```{r}
 # dataset paths
-base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/test_dataset_raw"
-base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/train_dataset_raw"
+base_path_test <- "data/test_dataset_raw"
 
-# extra tweets classified not belonging to the original dataset
-#base_path_extra <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/extra"
+base_path_train <- "data/train_dataset_raw"
 
-output_dir <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/output/model_performances"
+path_translation_test <- "data/test_dataset_translation"
 
-path_translation_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test"
-
-path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train"
+path_translation_train <- "data/train_dataset_translation"
 
 #path_translation_checked_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test/"
 
 #path_translation_checked_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train/"
+
+# output path
+output_dir <- "output"
 ```
 
 ```{r}
@@ -88,6 +89,54 @@ get_all_files <- function(dirs) {
 ```
 
 ```{r}
+lang_code_to_name <- function(code) {
+  lang_map <- c(
+  "mig-ar" = "Arabic",
+  "mig-ar-L3" = "Arabic",
+  "mig-es" = "Spanish",
+  "mig-es-L3" = "Spanish",
+  "mig-en" = "English",
+  "mig-en-L3" = "English",
+  "mig-pt" = "Portuguese",
+  "mig-pt-L3" = "Portuguese",
+  "mig-fr" = "French",
+  "mig-fr-L3" = "French",
+  "mig-it" = "Italian",
+  "mig-it-L3" = "Italian",
+  "mig-de" = "German",
+  "mig-de-L3" = "German",
+  "mig-hi" = "Hindi",
+  "mig-hi-L3" = "Hindi",
+  "mig-ko-L3" = "Korean",
+  "mig-ko" = "Korean",
+  "mig-en-es" = "Eng-Spa",
+  "mig-en-es-L3" = "Eng-Spa",
+  "mig-multi" = "Multi",
+  "mig-multi-L3" = "Multi",
+  "mig-mu" = "Multi",
+  "mig-mu-L3" = "Multi",
+  "mig-hu" = "Hungarian",
+  "mig-hu-L3" = "Hungarian",
+  "mig-in" = "Indonesian",
+  "mig-in-L3" = "Indonesian",
+  "mig-es-translation" = "Spanish Translation",
+  "mig-es-translation-L3" = "Spanish Translation",
+  "mig-tr" = "Turkish",
+  "mig-tr-L3" = "Turkish",
+  "mig-pl" = "Polish",
+  "mig-pl-L3" = "Polish"
+  )
+  
+  if (code %in% names(lang_map)) {
+    return(lang_map[[code]])
+  } else {
+    warning(paste("Unknown or unwanted language code:", code))
+    return(NA)
+  }
+}
+```
+
+```{r}
 extract_model_dataset <- function(filename) {
   model <- NA
   language <- NA
@@ -116,8 +165,9 @@ extract_model_dataset <- function(filename) {
     }
   }
   
-  # Extract language from mig-xx-L3 pattern
-  mig_lang_match <- stringr::str_match(filename, "mig-([a-z]{2})-L\\d")[,2]
+  # Extract full lang key like "mig-fr"
+  mig_lang_match <- stringr::str_match(filename, "(mig-[a-z]{2}(?:-L\\d+)?)")[,2]
+  
   if (!is.na(mig_lang_match)) {
     language <- lang_code_to_name(mig_lang_match)
   }
@@ -129,52 +179,6 @@ extract_model_dataset <- function(filename) {
   }
   
   return(list(Model = model, Language = language))
-}
-```
-
-```{r}
-lang_code_to_name <- function(code) {
-  code <- tolower(code)
-  lang_map <- c(
-  "mig-ar" = "Arabic",
-  "mig-ar-L3" = "Arabic",
-  "mig-es" = "Spanish",
-  "mig-es-L3" = "Spanish",
-  "mig-en" = "English",
-  "mig-en-L3" = "English",
-  "mig-pt" = "Portuguese",
-  "mig-pt-L3" = "Portuguese",
-  "mig-fr" = "French",
-  "mig-fr-L3" = "French",
-  "mig-it" = "Italian",
-  "mig-it-L3" = "Italian",
-  "mig-de" = "German",
-  "mig-de-L3" = "German",
-  "mig-hi" = "Hindi",
-  "mig-hi-L3" = "Hindi",
-  "mig-ko-L3" = "Korean",
-  "mig-en-es" = "Eng-Spa",
-  "mig-en-es-L3" = "Eng-Spa",
-  "mig-multi" = "Multi",
-  "mig-multi-L3" = "Multi",
-  "mig-hu" = "Hungarian",
-  "mig-hu-L3" = "Hungarian",
-  "mig-in" = "Indonesian",
-  "mig-in-L3" = "Indonesian",
-  "mig-es-translation" = "Spanish Translation",
-  "mig-es-translation-L3" = "Spanish Translation",
-  "mig-tr" = "Turkish",
-  "mig-tr-L3" = "Turkish",
-  "mig-pl" = "Polish",
-  "mig-pl-L3" = "Polish",
-  )
-  
-  if (code %in% names(lang_map)) {
-    return(lang_map[[code]])
-  } else {
-    warning(paste("Unknown or unwanted language code:", code))
-    return(NA)
-  }
 }
 ```
 
@@ -264,6 +268,7 @@ list_of_processed_files <- lapply(all_files, function(file_info) {
 df <- do.call(rbind, Filter(Negate(is.null), list_of_processed_files))
 ```
 
+#### Post-processing dataset
 ```{r}
 # assign new ID
 df <- assign_new_ids(df)
@@ -363,6 +368,13 @@ df <- df %>%
   filter(!is.na(label_llama))
 ```
 
+```{r}
+df <- df %>%
+  group_by(Language, Train_Test) %>%
+  mutate(Share_Unrelated = mean(label == "unrelated")) %>%
+  ungroup()
+```
+
 
 ```{r}
 # count number of obs per language
@@ -405,20 +417,63 @@ summary(logit_model)
 
 ```{r}
 # Fit the logistic regression model
-logit_model_interaction <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+logit_modelxlanguage <- glm(Correct ~ Model*Language + Model*Share_Unrelated + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
                    family = binomial())
 
 # Summarize the model
-summary(logit_model_interaction)
+summary(logit_modelxlanguage)
+```
+```{r}
+# Fit the logistic regression model
+logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+                   data = df, 
+                   family = binomial())
+
+# Summarize the model
+summary(logit_modelxlabel)
+```
+
+Idea - to test if the Multilanguage adds noize, we keep the language contant (English) and see how it performs
+
+```{r}
+# select only tweets classified based on the translation
+df_translation <- df %>%
+  filter(Translation == 1)
+
+# Fit the logistic regression model
+logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+                   data = df_translation, 
+                   family = binomial())
+
+# Summarize the model
+summary(logit_modelxlabel)
+```
+
+```{r}
+library(lme4)
+
+# Multilevel logistic regression
+logit_mixed <- glmer(Correct ~ Model * Language + label + Train_Test + TranslationQuality + 
+             (1 | Language), 
+      data = df, family = binomial())
+
+# Summarize the model
+summary(logit_mixed)
+```
+```{r}
+# Multilevel logistic regression with random slopes
+multilevel_interaction <- glmer(Correct ~ Model + label + Train_Test + TranslationQuality + 
+             (1 + Model | Language), 
+      data = df, family = binomial())
+
+summary(multilevel_interaction)
+
 ```
 
 ##### Random Forest
 ```{r}
-library(rpart)
-library(rpart.plot)
 tree <- rpart(Correct ~ Model + Language + Train_Test + TranslationQuality + label, # add TrainSize
                          data = df)
 rpart.plot(tree, yesno = 2)
 ```
-
