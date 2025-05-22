@@ -394,6 +394,24 @@ translation_count <- df %>%
 translation_count
 ```
 
+### Add language pre-trainign share from Touvron et al. (2023)
+```{r}
+# Create the language share lookup table
+lang_share_lookup <- data.frame(
+  code = c("en", "unknown", "de", "fr", "sv", "zh", "es", "ru", "nl", "it", "ja", "pl", "pt", "vi",
+           "uk", "ko", "ca", "sr", "id", "cs", "fi", "hu", "no", "ro", "bg", "da", "sl", "hr"),
+  Language = c("English", "Unknown", "German", "French", "Swedish", "Chinese", "Spanish", "Russian", "Dutch", "Italian", 
+               "Japanese", "Polish", "Portuguese", "Vietnamese", "Ukrainian", "Korean", "Catalan", "Serbian", "Indonesian",
+               "Czech", "Finnish", "Hungarian", "Norwegian", "Romanian", "Bulgarian", "Danish", "Slovene", "Croatian"),
+  LangShare = c(89.70, 8.38, 0.17, 0.16, 0.15, 0.13, 0.13, 0.13, 0.12, 0.11, 0.10, 0.09, 0.09, 0.08,
+                0.07, 0.06, 0.04, 0.04, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01)
+)
+
+# Merge the LangShare into your existing df by the language code
+df <- merge(df, lang_share_lookup, by = "Language", all.x = TRUE)
+df$LangShare[is.na(df$LangShare)] <- 0
+```
+
 ## Model
 ```{r}
 # Set reference levels for the factors
@@ -448,6 +466,53 @@ logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + Transla
 
 # Summarize the model
 summary(logit_modelxlabel)
+```
+```{r}
+df$LogLangShare <- log1p(df$LangShare)
+
+logit_model_interact <- glm(Correct ~ Model * LogLangShare + Language + label + Train_Test + TranslationQuality + label,
+                            data = df,
+                            family = binomial())
+
+summary(logit_model_interact)
+```
+```{r}
+# Safely convert Correct to numeric (if it's 0/1 stored as character or factor)
+df$Correct_Num <- as.numeric(as.character(df$Correct))
+
+lang_summary <- df %>%
+  group_by(Language, LangShare) %>%
+  summarise(accuracy = mean(Correct_Num, na.rm = TRUE), n = n()) %>%
+  ungroup()
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+df_summary <- df %>%
+  # remove obs where Language is English
+  filter(Language != "English") %>%
+  filter(label != "unrelated") %>%
+  group_by(Language, Model, LogLangShare) %>%
+  summarise(accuracy = mean(Correct_Num), .groups = "drop")
+
+ggplot(df_summary, aes(x = LogLangShare, y = accuracy, color = Model)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Accuracy by Language Share and Model Type",
+       x = "Language Share in Pretraining (%)",
+       y = "Mean Accuracy") +
+  theme_minimal()
+```
+```{r}
+ggplot(df_summary, aes(x = LogLangShare, y = accuracy)) +
+  geom_point(color = "steelblue") +
+  geom_smooth(method = "lm", color = "darkred", se = FALSE) +
+  facet_wrap(~ Model) +
+  labs(title = "Accuracy vs Log(Language Share) by Model (without Unrelated and English tweets)",
+       x = "log(1 + Language Share in Pretraining)",
+       y = "Mean Accuracy") +
+  theme_minimal()
 ```
 
 ```{r}
