@@ -80,7 +80,8 @@ full_language_map <- list(
   "mig-tr" = "Turkish",
   "mig-tr-L3" = "Turkish",
   "mig-pl" = "Polish",
-  "mig-pl-L3" = "Polish"
+  "mig-pl-L3" = "Polish",
+  "mig-ko-L3" = "Korean"
 )
 
 # Define mapping for "Full" dataset (subset)
@@ -107,7 +108,8 @@ if (dataset == "Full") {
     "mig-tr" = "Turkish",
     "mig-tr-L3" = "Turkish",
     "mig-pl" = "Polish",
-    "mig-pl-L3" = "Polish"
+    "mig-pl-L3" = "Polish",
+    "mig-ko-L3" = "Korean"
   )
 } else {
   language_map <- full_language_map
@@ -291,8 +293,13 @@ if (translation_check) {
     stop("translation_check is TRUE but dataset is not 'Test' or 'Train'")
   }
 
-  # List all *_checked.xlsx files in the selected path
-  checked_files <- list.files(translation_checked_path, pattern = "_checked\\.xlsx$", full.names = TRUE)
+  # List all *_checked.xlsx and *_checked.csv files in the selected path
+  checked_files <- list.files(
+    translation_checked_path,
+    pattern = "_checked\\.(xlsx|csv)$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
 }
 ```
 
@@ -411,6 +418,6 @@ if (translation_check) {
   print(plot_translation)
   
   # save the dataset in with ggsave
-  ggsave(paste0("accuracy_plot_translation_quality_", dataset, ".png"), plot_translation, width = 10, height = 6, dpi = 300)
+  #ggsave(paste0("accuracy_plot_translation_quality_", dataset, ".png"), plot_translation, width = 10, height = 6, dpi = 300)
 }
 ```

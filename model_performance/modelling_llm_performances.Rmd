@@ -37,6 +37,9 @@ library(pROC)
 base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/test_dataset_raw"
 base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/train_dataset_raw"
 
+# extra tweets classified not belonging to the original dataset
+#base_path_extra <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/extra"
+
 output_dir <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/output/model_performances"
 
 path_translation_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test"
@@ -86,25 +89,53 @@ get_all_files <- function(dirs) {
 
 ```{r}
 extract_model_dataset <- function(filename) {
-  filename <- gsub(".csv", "", filename)
-  parts <- unlist(strsplit(filename, "_"))
+  model <- NA
+  language <- NA
   
-  model_end <- max(grep("llama", parts))
-  dataset_start <- min(grep("mig-", parts))
+  # Extract model name (e.g., llama-32-3B)
+  model_match <- stringr::str_extract(filename, "llama-[^_]+")
+  if (!is.na(model_match)) {
+    model <- model_match
+  } else {
+    # Extract model suffix right before _gguf
+    model_suffix_match <- stringr::str_match(filename, "_([a-z\\-]+)_gguf")[,2]
+    
+    if (!is.na(model_suffix_match)) {
+      # Map suffix to model name
+      if (model_suffix_match == "en-es") {
+        model <- "llama-32-3B-en-es-Q4"
+      } else if (model_suffix_match == "multi") {
+        model <- "llama-32-3B-multi-Q4"
+      } else if (model_suffix_match == "en") {
+        model <- "llama-32-3B-en-Q4"
+      } else if (model_suffix_match == "es") {
+        model <- "llama-32-3B-es-Q4"
+      } else {
+        model <- model_suffix_match  # fallback: just the suffix itself
+      }
+    }
+  }
   
-  model <- paste(parts[1:model_end], collapse = "-")
+  # Extract language from mig-xx-L3 pattern
+  mig_lang_match <- stringr::str_match(filename, "mig-([a-z]{2})-L\\d")[,2]
+  if (!is.na(mig_lang_match)) {
+    language <- lang_code_to_name(mig_lang_match)
+  }
   
-  dataset_code <- parts[dataset_start]
-  dataset <- ifelse(dataset_code %in% names(language_map), language_map[[dataset_code]], dataset_code)
+  # Extract language from _xx_ pattern if language not set
+  lang_code_match <- stringr::str_match(filename, "_([a-z]{2})_")[,2]
+  if (is.na(language) && !is.na(lang_code_match)) {
+    language <- lang_code_to_name(lang_code_match)
+  }
   
-  return(data.frame(Model = model, Language = dataset, stringsAsFactors = FALSE))
+  return(list(Model = model, Language = language))
 }
 ```
 
-
 ```{r}
-# language mapping
-language_map <- list(
+lang_code_to_name <- function(code) {
+  code <- tolower(code)
+  lang_map <- c(
   "mig-ar" = "Arabic",
   "mig-ar-L3" = "Arabic",
   "mig-es" = "Spanish",
@@ -121,6 +152,7 @@ language_map <- list(
   "mig-de-L3" = "German",
   "mig-hi" = "Hindi",
   "mig-hi-L3" = "Hindi",
+  "mig-ko-L3" = "Korean",
   "mig-en-es" = "Eng-Spa",
   "mig-en-es-L3" = "Eng-Spa",
   "mig-multi" = "Multi",
@@ -134,19 +166,25 @@ language_map <- list(
   "mig-tr" = "Turkish",
   "mig-tr-L3" = "Turkish",
   "mig-pl" = "Polish",
-  "mig-pl-L3" = "Polish"
-)
+  "mig-pl-L3" = "Polish",
+  )
+  
+  if (code %in% names(lang_map)) {
+    return(lang_map[[code]])
+  } else {
+    warning(paste("Unknown or unwanted language code:", code))
+    return(NA)
+  }
+}
 ```
 
 ```{r}
-# Helper function to read and process files
 process_file <- function(file_path, split_type) {
   # Skip files with "full" or "es-translation"
-  if (grepl("full", basename(file_path)) || grepl("es-translation", basename(file_path))) {
+  if (grepl("full", basename(file_path)) ) {
     return(NULL)
   }
   
-  # Skip files that don't contain "llama-32-3B"
   if (!grepl("llama-32-3B", basename(file_path))) {
     return(NULL)
   }
@@ -163,15 +201,19 @@ process_file <- function(file_path, split_type) {
   
   # If the data frame is empty or null, return NULL
   if (is.null(df) || nrow(df) == 0) return(NULL)
+  
+  # Rename "text" to "plaintext" only if "plaintext" doesn't already exist
+  if ("text" %in% names(df) && !"plaintext" %in% names(df)) {
+    df <- df %>% rename(plaintext = text)
+  }
 
   # Extract model and language information from filename
   meta <- extract_model_dataset(basename(file_path))
 
-# Set Translation value based on the `translation_check` column in the dataset
+  # Set Translation value based on the `translation_check` column in the dataset
   if ("translation_check" %in% colnames(df)) {
     df$TranslationQuality <- ifelse(df$translation_check == 1, 'Good', 'Bad')
     df$Translation <- 1
-    #print(paste("Processed translation_checked file:", file_path))
   } else if (startsWith(file_path, path_translation_train) || startsWith(file_path, path_translation_test)) {
     # If file is from path_translation_train or path_translation_test, set Translation to 1
     df$Translation <- 1
@@ -198,6 +240,7 @@ process_file <- function(file_path, split_type) {
 ```
 
 ```{r}
+# assign new IDs to each unique plaintext
 assign_new_ids <- function(df) {
   df %>%
     group_by(plaintext) %>%
@@ -233,9 +276,25 @@ df <- df %>%
 ```
 
 ```{r}
+# count number of obs per language
+df %>%
+  count(Language, name = "n_observations") %>%
+  arrange(desc(n_observations))
+
+table(df$Language)
+```
+
+```{r}
 # remove duplicate - each observation should have a unique pair of newId and filepath
 df <- df %>%
   distinct(file_path, newId, .keep_all = TRUE) 
+```
+
+```{r}
+# remove obs where Language is NA
+df <- df %>%
+  filter(!is.na(Language)) %>%
+  distinct(file_path, newId, .keep_all = TRUE)
 ```
 
 ```{r}
@@ -276,7 +335,7 @@ df <- df %>%
 ```
 
 ```{r}
-# Ensure all variables are factors (if needed)
+# Ensure all variables are factors
 df <- df %>%
   mutate(
     message_id = as.character(message_id),
@@ -298,6 +357,12 @@ print(na_count)
 # check how many correct values are in Correct
 table(df$Correct)
 ```
+```{r}
+# remove obs with NA in label_llama
+df <- df %>%
+  filter(!is.na(label_llama))
+```
+
 
 ```{r}
 # count number of obs per language
@@ -307,8 +372,9 @@ df %>%
 
 table(df$Language)
 ```
+
 ```{r}
-# count the number of obs with Translation == 2
+# count the number of obs with Translation == 'Good'
 translation_count <- df %>%
   filter(TranslationQuality == 'Good') %>%
   group_by(Model, Language) %>%
@@ -329,7 +395,7 @@ df$TranslationQuality <- relevel(df$TranslationQuality, ref = "Not Translated") 
 df$Translation <- factor(df$Translation)
 
 # Fit the logistic regression model
-logit_model <- glm(Correct ~ Model + Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+logit_model <- glm(Correct ~ Model + Language + Train_Test + TranslationQuality + label, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
                    family = binomial())
 
@@ -339,32 +405,15 @@ summary(logit_model)
 
 ```{r}
 # Fit the logistic regression model
-logit_model_2 <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+logit_model_interaction <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
                    family = binomial())
 
 # Summarize the model
-summary(logit_model_2)
+summary(logit_model_interaction)
 ```
 
 ##### Random Forest
-```{r}
-# Load the package
-library(randomForest)
-
-# Fit a random forest model
-#rf_model <- randomForest(Correct ~ Model + Language + Train_Test + TranslationQuality + label, 
-#                         data = df, 
-#                         importance = TRUE, 
-#                         ntree = 500)
-
-# Summarize the random forest model
-#print(rf_model)
-
-# Plot the importance of the variables
-#importance(rf_model)  # This will show the importance of each variable
-#varImpPlot(rf_model)  # This will generate a plot showing the importance of each variable
-```
 ```{r}
 library(rpart)
 library(rpart.plot)
