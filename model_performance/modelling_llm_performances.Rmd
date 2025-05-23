@@ -25,6 +25,7 @@ options(scipen = 999)
 ```{r}
 # load libraries
 library(dplyr)
+library(ggplot2)
 library(readr)
 library(stringr)
 library(caret)
@@ -452,7 +453,10 @@ logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + Transla
 summary(logit_modelxlabel)
 ```
 
-Idea - to test if the Multilanguage adds noize, we keep the language contant (English) and see how it performs
+Idea - to test if the Multilanguage adds noise, we keep the language constant (English) and see how it performs. This means that we need to use only tweets that were classified based on the translation.
+
+The results below seems to show that even when we use only tweets in English, the Multilanguage model performs worse than English-Spanish Model and Spanish Model in classifying unrelated tweets.
+This seems to suggest that Multilanguage model is worse when it comes to classifying unrelated tweets, even when we use only tweets in English.
 
 ```{r}
 # select only tweets classified based on the translation
@@ -486,17 +490,14 @@ lang_summary <- df %>%
   ungroup()
 ```
 ```{r}
-library(dplyr)
-library(ggplot2)
-
 df_summary <- df %>%
   # remove obs where Language is English
   filter(Language != "English") %>%
   filter(label != "unrelated") %>%
-  group_by(Language, Model, LogLangShare) %>%
+  group_by(Language, Model, LangShare) %>%
   summarise(accuracy = mean(Correct_Num), .groups = "drop")
 
-ggplot(df_summary, aes(x = LogLangShare, y = accuracy, color = Model)) +
+ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
   geom_point() +
   geom_smooth(method = "lm") +
   labs(title = "Accuracy by Language Share and Model Type",
@@ -505,14 +506,41 @@ ggplot(df_summary, aes(x = LogLangShare, y = accuracy, color = Model)) +
   theme_minimal()
 ```
 ```{r}
-ggplot(df_summary, aes(x = LogLangShare, y = accuracy)) +
-  geom_point(color = "steelblue") +
-  geom_smooth(method = "lm", color = "darkred", se = FALSE) +
+# Step 1: Summarize and order Language by mean LangShare
+language_order <- df_summary %>%
+  group_by(Language) %>%
+  summarise(mean_share = mean(LangShare), .groups = "drop") %>%
+  arrange(mean_share) %>%
+  pull(Language)
+# Step 2: Set Language as ordered factor
+df_summary$Language <- factor(df_summary$Language, levels = language_order)
+```
+
+
+```{r}
+# Plot
+ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Language)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", aes(group = 1)) +
   facet_wrap(~ Model) +
-  labs(title = "Accuracy vs Log(Language Share) by Model (without Unrelated and English tweets)",
-       x = "log(1 + Language Share in Pretraining)",
-       y = "Mean Accuracy") +
+  labs(
+    title = "Accuracy vs Language Share by Model",
+    x = "Share of Language in LLAMA Pretraining",
+    y = "Mean Accuracy",
+    color = "Language"
+  ) +
   theme_minimal()
+
+```
+```{r}
+# Get linear model coefficients per model
+coefficients_table <- df_summary %>%
+  group_by(Model) %>%
+  do(tidy(lm(accuracy ~ LangShare, data = .))) %>%
+  filter(term == "LangShare") %>%
+  select(Model, Estimate = estimate, Std_Error = std.error, p_value = p.value)
+
+print(coefficients_table)
 ```
 
 ```{r}
