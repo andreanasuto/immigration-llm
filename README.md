@@ -1,4 +1,4 @@
-# Training large language models (llm) for migration sentiment
+# Training Large Language Models (llms) for Migration Sentiment
 # README 📘
 
 ## Project Overview 📂
