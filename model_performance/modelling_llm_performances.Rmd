@@ -26,6 +26,8 @@ options(scipen = 999)
 # load libraries
 library(dplyr)
 library(ggplot2)
+library(tidyr)
+library(purrr)
 library(readr)
 library(stringr)
 library(caret)
@@ -385,6 +387,15 @@ df %>%
 
 table(df$Language)
 ```
+```{r}
+# count number of unique observations per language
+df_unique_counts <- df %>%
+  distinct(newId, Language) %>%  # ensure uniqueness of newID per language
+  count(Language, name = "n_unique_observations") %>%
+  arrange(desc(n_unique_observations))
+
+df_unique_counts
+```
 
 ```{r}
 # count the number of obs with Translation == 'Good'
@@ -435,15 +446,89 @@ summary(logit_model)
 ```
 
 ```{r}
+# Model 2 - Interactions Model*Language
 # Fit the logistic regression model
-logit_modelxlanguage <- glm(Correct ~ Model*Language + Model*Share_Unrelated + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+logit_modelxlanguage <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
                    family = binomial())
 
 # Summarize the model
 summary(logit_modelxlanguage)
 ```
+
 ```{r}
+# Model 2 - Interactions Model*Language + Model*Share_Unrelated
+# Fit the logistic regression model
+logit_modelxShareUnrelated <- glm(Correct ~ Model*Language + Model*Share_Unrelated + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)
+                   data = df, 
+                   family = binomial())
+
+# Summarize the model
+summary(logit_modelxShareUnrelated)
+```
+###### Visualization of the interaction Model x Language + Model x Share of Unrelated
+```{r}
+# Define your languages and models
+languages <- c("Turkish", "Spanish", "Portuguese", "Polish", "Korean", "Italian",
+               "Indonesian", "Hungarian", "Hindi", "German", "French", "Arabic")
+models <- c("English-Spanish", "Multilanguage", "Spanish")
+shares <- seq(0, 1, 0.1)
+
+# Extract coefficients from the model summary
+coefs <- coef(logit_modelxShareUnrelated)
+coef_names <- names(coefs)
+
+# Function to get coefficient or return 0 if not found
+get_coef <- function(term) {
+  if (term %in% coef_names) {
+    return(coefs[term])
+  } else {
+    return(0)
+  }
+}
+
+# Build the dataset
+df_plot <- expand.grid(
+  Share_Unrelated = shares,
+  Language = languages,
+  Model = models
+) %>%
+  rowwise() %>%
+  mutate(
+    main_effect = get_coef(paste0("Model", Model)),
+    lang_interaction = get_coef(paste0("Model", Model, ":Language", Language)),
+    share_interaction = get_coef(paste0("Model", Model, ":Share_Unrelated")),
+    total_effect = main_effect + lang_interaction + Share_Unrelated * share_interaction,
+    Accuracy = 1 / (1 + exp(-total_effect))  # logistic transformation
+  )
+
+# Plot
+ggplot(df_plot, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
+  geom_line(size = 1.1) +
+  facet_wrap(~ Language, ncol = 4) +
+  labs(
+    x = "Share of Unrelated Tweets",
+    y = "Accuracy", # or Log-Odds
+    title = "Model Performance Across Languages and Noise Levels"
+  ) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "top")
+
+# Save the plot
+ggsave(
+  filename = "predicted_accuracy_by_language.png",
+  plot = last_plot(),
+  path = "output",
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+```
+
+
+```{r}
+# Model 3 - Interactions Model*label
 # Fit the logistic regression model
 logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
@@ -471,17 +556,22 @@ logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + Transla
 # Summarize the model
 summary(logit_modelxlabel)
 ```
+
+
 ```{r}
+# create log of LangShare
 df$LogLangShare <- log1p(df$LangShare)
 
-logit_model_interact <- glm(Correct ~ Model * LogLangShare + Language + label + Train_Test + TranslationQuality + label,
+# Model 4 - Interactions Model*LogLangShare
+logit_model_interact <- glm(Correct ~ Model*LangShare + Language + label + Train_Test + TranslationQuality + label,
                             data = df,
                             family = binomial())
 
 summary(logit_model_interact)
 ```
+
 ```{r}
-# Safely convert Correct to numeric (if it's 0/1 stored as character or factor)
+# convert Correct to numeric
 df$Correct_Num <- as.numeric(as.character(df$Correct))
 
 lang_summary <- df %>%
@@ -489,7 +579,10 @@ lang_summary <- df %>%
   summarise(accuracy = mean(Correct_Num, na.rm = TRUE), n = n()) %>%
   ungroup()
 ```
+
 ```{r}
+# Show relationship between accuracy and share of language in pretraining phase in LLAMA
+# create summary table removing unrelated and English tweets
 df_summary <- df %>%
   # remove obs where Language is English
   filter(Language != "English") %>%
@@ -497,6 +590,7 @@ df_summary <- df %>%
   group_by(Language, Model, LangShare) %>%
   summarise(accuracy = mean(Correct_Num), .groups = "drop")
 
+# plot accuracy by Language and Model
 ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
   geom_point() +
   geom_smooth(method = "lm") +
@@ -504,7 +598,11 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
        x = "Language Share in Pretraining (%)",
        y = "Mean Accuracy") +
   theme_minimal()
+
+# save the plot in output folder
+ggsave(file.path(output_dir, "accuracy_by_language_share.png"), width = 10, height = 6)
 ```
+
 ```{r}
 # Step 1: Summarize and order Language by mean LangShare
 language_order <- df_summary %>%
@@ -531,7 +629,10 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Language)) +
   ) +
   theme_minimal()
 
+# save the plot in output folder
+ggsave(file.path(output_dir, "accuracy_vs_language_share_by_model.png"), width = 10, height = 6)
 ```
+
 ```{r}
 # Get linear model coefficients per model
 coefficients_table <- df_summary %>%
@@ -543,6 +644,8 @@ coefficients_table <- df_summary %>%
 print(coefficients_table)
 ```
 
+
+#### Multilevel Models
 ```{r}
 library(lme4)
 
