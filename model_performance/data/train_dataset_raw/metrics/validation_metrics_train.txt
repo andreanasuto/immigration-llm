@@ -1,0 +1,390 @@
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.8427
+F1 Weighted Macro Score: 0.8478
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.6627
+F1 Weighted Macro Score: 0.6782
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.7345
+F1 Weighted Macro Score: 0.7437
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.6400
+F1 Weighted Macro Score: 0.6142
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.5867
+F1 Weighted Macro Score: 0.5966
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.5333
+F1 Weighted Macro Score: 0.5439
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.8133
+F1 Weighted Macro Score: 0.8019
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.5333
+F1 Weighted Macro Score: 0.5089
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.8133
+F1 Weighted Macro Score: 0.8426
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.5733
+F1 Weighted Macro Score: 0.5635
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.8000
+F1 Weighted Macro Score: 0.7978
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.6133
+F1 Weighted Macro Score: 0.6241
+
+
+Model: llama-32-3B-en-Q4_K_M | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.5600
+F1 Weighted Macro Score: 0.5586
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.6551
+F1 Weighted Macro Score: 0.6496
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.7520
+F1 Weighted Macro Score: 0.7433
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.6827
+F1 Weighted Macro Score: 0.6717
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.6000
+F1 Weighted Macro Score: 0.5248
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.5333
+F1 Weighted Macro Score: 0.5117
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.4800
+F1 Weighted Macro Score: 0.4766
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.8000
+F1 Weighted Macro Score: 0.7347
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.6000
+F1 Weighted Macro Score: 0.5383
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.8667
+F1 Weighted Macro Score: 0.8596
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.5733
+F1 Weighted Macro Score: 0.5679
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.7467
+F1 Weighted Macro Score: 0.7357
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.6133
+F1 Weighted Macro Score: 0.5726
+
+
+Model: llama-32-3B-es-Q4_K_M | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.4933
+F1 Weighted Macro Score: 0.4619
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.6924
+F1 Weighted Macro Score: 0.6901
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.7827
+F1 Weighted Macro Score: 0.7802
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.7128
+F1 Weighted Macro Score: 0.7066
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.6267
+F1 Weighted Macro Score: 0.5737
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.5467
+F1 Weighted Macro Score: 0.5394
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.5067
+F1 Weighted Macro Score: 0.5089
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.8133
+F1 Weighted Macro Score: 0.7495
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.5867
+F1 Weighted Macro Score: 0.5300
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.8933
+F1 Weighted Macro Score: 0.8911
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.6133
+F1 Weighted Macro Score: 0.6007
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7132
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.6533
+F1 Weighted Macro Score: 0.6231
+
+
+Model: llama-32-3B-es | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.5067
+F1 Weighted Macro Score: 0.4697
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.8062
+F1 Weighted Macro Score: 0.8094
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.7587
+F1 Weighted Macro Score: 0.7714
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.7909
+F1 Weighted Macro Score: 0.7961
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7348
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.7467
+F1 Weighted Macro Score: 0.7471
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.6800
+F1 Weighted Macro Score: 0.6716
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.7867
+F1 Weighted Macro Score: 0.7815
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.7467
+F1 Weighted Macro Score: 0.7537
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.9200
+F1 Weighted Macro Score: 0.9323
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7433
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.8800
+F1 Weighted Macro Score: 0.8830
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.8000
+F1 Weighted Macro Score: 0.8056
+
+
+Model: llama-32-3B-multi-Q4_K_M | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7330
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.8160
+F1 Weighted Macro Score: 0.8178
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.7933
+F1 Weighted Macro Score: 0.8017
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.8084
+F1 Weighted Macro Score: 0.8115
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.7733
+F1 Weighted Macro Score: 0.7686
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7360
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.6667
+F1 Weighted Macro Score: 0.6541
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.7867
+F1 Weighted Macro Score: 0.7730
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.8133
+F1 Weighted Macro Score: 0.8160
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.9333
+F1 Weighted Macro Score: 0.9412
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.7333
+F1 Weighted Macro Score: 0.7449
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.8800
+F1 Weighted Macro Score: 0.8883
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.8667
+F1 Weighted Macro Score: 0.8676
+
+
+Model: llama-32-3B-multi | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.7067
+F1 Weighted Macro Score: 0.6928
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-en-L3
+Accuracy: 0.8160
+F1 Weighted Macro Score: 0.8156
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-es-L3
+Accuracy: 0.7760
+F1 Weighted Macro Score: 0.7565
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-multi-L3
+Accuracy: 0.7619
+F1 Weighted Macro Score: 0.7526
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-ar-L3
+Accuracy: 0.6533
+F1 Weighted Macro Score: 0.5573
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-de-L3
+Accuracy: 0.6000
+F1 Weighted Macro Score: 0.5755
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-fr-L3
+Accuracy: 0.4667
+F1 Weighted Macro Score: 0.4579
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-hi-L3
+Accuracy: 0.7733
+F1 Weighted Macro Score: 0.7455
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-hu-L3
+Accuracy: 0.5467
+F1 Weighted Macro Score: 0.4763
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-in-L3
+Accuracy: 0.8800
+F1 Weighted Macro Score: 0.8667
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-it-L3
+Accuracy: 0.6533
+F1 Weighted Macro Score: 0.6308
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-pt-L3
+Accuracy: 0.6933
+F1 Weighted Macro Score: 0.6724
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-tr-L3
+Accuracy: 0.6933
+F1 Weighted Macro Score: 0.6430
+
+
+Model: llama32-3B-mig-en-es-full-Q4_K_M | Dataset: andreanasuto/mig-pl-L3
+Accuracy: 0.5200
+F1 Weighted Macro Score: 0.4845
+
+

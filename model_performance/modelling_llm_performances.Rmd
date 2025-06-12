@@ -38,24 +38,47 @@ library(rpart.plot)
 ```
 
 ```{r}
+# set working directory
+knitr::opts_knit$set(root.dir = "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm")
+
 # dataset paths
-base_path_test <- "data/test_dataset_raw"
+base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/test_dataset_raw"
 
-base_path_train <- "data/train_dataset_raw"
+base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/train_dataset_raw"
 
-path_translation_test <- "data/test_dataset_translation"
+path_translation_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/test_dataset_translation"
 
-path_translation_train <- "data/train_dataset_translation"
+path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/train_dataset_translation"
 
 #path_translation_checked_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test/"
 
 #path_translation_checked_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train/"
 
 # output path
-output_dir <- "output"
+output_dir <- "model_performance/output"
 ```
 
+---
+title: "Modelling LLM Performance"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
 ```{r}
+# Define model name
+meta_model <- "llama-32-3B"
+
+# Get all CSV files
+test_files <- list.files(base_path_test, pattern = "\\.csv$", full.names = TRUE)
+train_files <- list.files(base_path_train, pattern = "\\.csv$", full.names = TRUE)
+
+# Get all CSV files
+test_translation_files <- list.files(path_translation_test, pattern = "\\.(csv|xlsx)$", full.names = TRUE)
+train_translation_files <- list.files(path_translation_train, pattern = "\\.(csv|xlsx)$", full.names = TRUE)
+
 # Define dataset directories
 dirs <- list(
   list(path = base_path_train, type = "Train"),
@@ -63,136 +86,90 @@ dirs <- list(
   list(path = path_translation_train, type = "Train"),
   list(path = path_translation_test, type = "Test")
 )
-
-# Get all file paths for processing
-get_all_files <- function(dirs) {
-  all_files <- list()
-  for (dir in dirs) {
-    if (!is.character(dir$path) || length(dir$path) != 1) {
-      stop("Each dir in 'dirs' must contain a character path. Found: ", dir$path)
-    }
-
-    # List .csv and .xlsx files
-    files <- list.files(dir$path, full.names = TRUE, pattern = "\\.(csv|xlsx)$")
-
-    # Exclude files with 'translation' in the name for base_path_train and base_path_test
-    if (dir$path %in% c(base_path_train, base_path_test)) {
-      files <- files[!grepl("translation", basename(files), ignore.case = TRUE)]
-    }
-    
-    # Exclude files with 'full' in the name
-    files <- files[!grepl("full", basename(files), ignore.case = TRUE)]
-
-    for (f in files) {
-      all_files[[length(all_files) + 1]] <- list(file = f, type = dir$type)
-    }
-  }
-  return(all_files)
-}
 ```
 
 ```{r}
-lang_code_to_name <- function(code) {
-  lang_map <- c(
-  "mig-ar" = "Arabic",
-  "mig-ar-L3" = "Arabic",
-  "mig-es" = "Spanish",
-  "mig-es-L3" = "Spanish",
-  "mig-en" = "English",
-  "mig-en-L3" = "English",
-  "mig-pt" = "Portuguese",
-  "mig-pt-L3" = "Portuguese",
-  "mig-fr" = "French",
-  "mig-fr-L3" = "French",
-  "mig-it" = "Italian",
-  "mig-it-L3" = "Italian",
-  "mig-de" = "German",
-  "mig-de-L3" = "German",
-  "mig-hi" = "Hindi",
-  "mig-hi-L3" = "Hindi",
-  "mig-ko-L3" = "Korean",
-  "mig-ko" = "Korean",
-  "mig-en-es" = "Eng-Spa",
-  "mig-en-es-L3" = "Eng-Spa",
-  "mig-multi" = "Multi",
-  "mig-multi-L3" = "Multi",
-  "mig-mu" = "Multi",
-  "mig-mu-L3" = "Multi",
-  "mig-hu" = "Hungarian",
-  "mig-hu-L3" = "Hungarian",
-  "mig-in" = "Indonesian",
-  "mig-in-L3" = "Indonesian",
-  "mig-es-translation" = "Spanish Translation",
-  "mig-es-translation-L3" = "Spanish Translation",
-  "mig-tr" = "Turkish",
-  "mig-tr-L3" = "Turkish",
-  "mig-pl" = "Polish",
-  "mig-pl-L3" = "Polish"
-  )
-  
-  if (code %in% names(lang_map)) {
-    return(lang_map[[code]])
+# Function to determine language
+get_language <- function(file_path, df) {
+  if (str_detect(file_path, "mig-multi")) {
+    return(df$lang[1])
   } else {
-    warning(paste("Unknown or unwanted language code:", code))
-    return(NA)
+    filename <- basename(file_path)
+    lang_from_name <- str_match(filename, "_([a-z]{2})\\.csv$|_([a-z]{2})_")[,2]
+    if (!is.na(lang_from_name)) {
+      return(lang_from_name)
+    } else {
+      return(df$tweet_lang[1])
+    }
   }
 }
 ```
 
 ```{r}
 extract_model_dataset <- function(filename) {
-  model <- NA
-  language <- NA
-  
-  # Extract model name (e.g., llama-32-3B)
-  model_match <- stringr::str_extract(filename, "llama-[^_]+")
-  if (!is.na(model_match)) {
-    model <- model_match
+  # Remove .csv and extract base name
+  base <- basename(gsub("\\.csv$", "", filename))
+  parts <- unlist(strsplit(base, "_"))
+
+  # Try to extract model name: look for stop tokens like _K, _mig-*, _test
+  stop_keywords <- grep("^K$|^mig-|^test$", parts)
+
+  if (length(stop_keywords) > 0) {
+    model <- paste(parts[1:(min(stop_keywords) - 1)], collapse = "_")
   } else {
-    # Extract model suffix right before _gguf
-    model_suffix_match <- stringr::str_match(filename, "_([a-z\\-]+)_gguf")[,2]
-    
-    if (!is.na(model_suffix_match)) {
-      # Map suffix to model name
-      if (model_suffix_match == "en-es") {
-        model <- "llama-32-3B-en-es-Q4"
-      } else if (model_suffix_match == "multi") {
-        model <- "llama-32-3B-multi-Q4"
-      } else if (model_suffix_match == "en") {
-        model <- "llama-32-3B-en-Q4"
-      } else if (model_suffix_match == "es") {
-        model <- "llama-32-3B-es-Q4"
-      } else {
-        model <- model_suffix_match  # fallback: just the suffix itself
-      }
-    }
+    model <- base  # fallback: use whole filename if pattern unclear
   }
-  
-  # Extract full lang key like "mig-fr"
-  mig_lang_match <- stringr::str_match(filename, "(mig-[a-z]{2}(?:-L\\d+)?)")[,2]
-  
-  if (!is.na(mig_lang_match)) {
-    language <- lang_code_to_name(mig_lang_match)
+
+  # Convert list to named vector (this is KEY!)
+  model_map <- c(
+    "llama32-3B-mig-en-es-Q4" = "English-Spanish",
+    "llama32-3B-mig-en-Q4"    = "English",
+    "llama32-3B-mig-es-Q4"    = "Spanish",
+    "llama32-3B-mig-multi-Q4" = "Multi"
+  )
+
+  # Lookup in named vector
+  if (model %in% names(model_map)) {
+    return(model_map[model])
+  } else {
+    return(model)
   }
-  
-  # Extract language from _xx_ pattern if language not set
-  lang_code_match <- stringr::str_match(filename, "_([a-z]{2})_")[,2]
-  if (is.na(language) && !is.na(lang_code_match)) {
-    language <- lang_code_to_name(lang_code_match)
-  }
-  
-  return(list(Model = model, Language = language))
+}
+
+```
+
+
+```{r}
+lang_code_to_name <- function(code) {
+  language_map <- list(
+    "ar" = "Arabic",
+    "es" = "Spanish",
+    "pt" = "Portuguese",
+    "fr" = "French",
+    "it" = "Italian",
+    "de" = "German",
+    "hi" = "Hindi",
+    "hu" = "Hungarian",
+    "in" = "Indonesian",
+    "tr" = "Turkish",
+    "pl" = "Polish",
+    "ko" = "Korean",
+    "en" = "English"
+  )
+  return(ifelse(code %in% names(language_map), language_map[[code]], code))
 }
 ```
 
 ```{r}
-process_file <- function(file_path, split_type) {
-  # Skip files with "full" or "es-translation"
-  if (grepl("full", basename(file_path)) ) {
+process_dataset <- function(file_path, split_type) {
+  
+  # Skip files that contain 'full' in the name
+  if (str_detect(tolower(file_path), "full")) {
+    #message(paste("Skipping file with 'full' in name:", file_path))
     return(NULL)
   }
   
-  if (!grepl("llama-32-3B", basename(file_path))) {
+  if (!grepl("Q4", basename(file_path))) {
     return(NULL)
   }
   
@@ -206,41 +183,84 @@ process_file <- function(file_path, split_type) {
     return(NULL)  # Skip unsupported file types
   }
   
-  # If the data frame is empty or null, return NULL
-  if (is.null(df) || nrow(df) == 0) return(NULL)
-  
   # Rename "text" to "plaintext" only if "plaintext" doesn't already exist
   if ("text" %in% names(df) && !"plaintext" %in% names(df)) {
     df <- df %>% rename(plaintext = text)
   }
+  
+# Function to detect if a file is from mig-multi or one of the translation folders
+is_mig_multi_or_translation <- function(file_path) {
+  path <- tolower(normalizePath(file_path))
+  translation_test <- tolower(normalizePath(path_translation_test))
+  translation_train <- tolower(normalizePath(path_translation_train))
 
-  # Extract model and language information from filename
-  meta <- extract_model_dataset(basename(file_path))
+  str_detect(path, "mig-multi") |
+    str_starts(path, translation_test) |
+    str_starts(path, translation_train)
+}
+  
+  # Determine if it's a relevant dataset
+  mig_or_trans_flag <- is_mig_multi_or_translation(file_path)
+  
+  # Assign language column row-wise
+  df <- df %>%
+    mutate(lang_code = if (mig_or_trans_flag) lang else tweet_lang)
 
-  # Set Translation value based on the `translation_check` column in the dataset
+  df$Language <- map_chr(df$lang_code, lang_code_to_name)
+  
+  # assign message_id
+  df <- df %>%
+    mutate(
+      message_id = case_when(
+        is.numeric(message_id) ~ formatC(message_id, format = "f", drop0trailing = TRUE),
+        TRUE ~ as.character(message_id)
+      )
+    )
+
+  # Assign Model
+  model <- extract_model_dataset(file_path)
+
   if ("translation_check" %in% colnames(df)) {
-    df$TranslationQuality <- ifelse(df$translation_check == 1, 'Good', 'Bad')
+    df$TranslationQuality <- ifelse(df$translation_check == 1, "Good", "Bad")
     df$Translation <- 1
   } else if (startsWith(file_path, path_translation_train) || startsWith(file_path, path_translation_test)) {
-    # If file is from path_translation_train or path_translation_test, set Translation to 1
     df$Translation <- 1
-    df$TranslationQuality <- 'Unknown'
+    df$TranslationQuality <- "Unknown"
   } else {
-    # Otherwise, set Translation to 0
     df$Translation <- 0
-    df$TranslationQuality <- 'Not Translated'
+    df$TranslationQuality <- "Not Translated"
   }
-  
-  # Process the dataset
+
+  # Final dataframe
   df_processed <- df %>%
     mutate(
-      Model = meta$Model,
-      Language = meta$Language,
+      Model = model,
       Train_Test = split_type,
       Correct = ifelse(label_llama == label, 1, 0),
       file_path = file_path
     ) %>%
-    select(message_id, Model, Language, Translation, TranslationQuality, Train_Test, Correct, label, label_llama, plaintext, file_path)
+    select(
+      message_id, Model, Language, Translation, TranslationQuality,
+      Train_Test, Correct, label, label_llama, plaintext, file_path
+    )
+  
+  # Rename Model values here
+  df_processed <- df_processed %>%
+    mutate(Model = case_when(
+      Model == "llama-32-3B-en-es-Q4" ~ "English-Spanish",
+      Model == "llama-32-3B-en-Q4"    ~ "English",
+      Model == "llama-32-3B-es-Q4"    ~ "Spanish",
+      Model == "llama-32-3B-multi-Q4" ~ "Multi",
+      TRUE ~ Model
+    ))
+  
+  # make consistent Neutral
+  df_processed <- df_processed %>%
+    mutate(label = case_when(
+      label == "Neutral" ~ "neutral",
+      TRUE ~ label
+    ))
+
 
   return(df_processed)
 }
@@ -257,30 +277,32 @@ assign_new_ids <- function(df) {
 ```
 
 ### Create dataset
-
 ```{r}
-# Combine the processed data from all files
-all_files <- get_all_files(dirs)
-list_of_processed_files <- lapply(all_files, function(file_info) {
-  process_file(file_info$file, file_info$type)
-})
-```
+# Collect all .csv files from test and train folders
+test_files <- list.files(base_path_test, pattern = "\\.csv$", full.names = TRUE)
+train_files <- list.files(base_path_train, pattern = "\\.csv$", full.names = TRUE)
+translation_test_files <- list.files(path_translation_test, pattern = "\\.xlsx$", full.names = TRUE)
+translation_train_files <- list.files(path_translation_train, pattern = "\\.xlsx$", full.names = TRUE)
 
-```{r}
-# create dataset
-df <- do.call(rbind, Filter(Negate(is.null), list_of_processed_files))
+# Process each file and combine
+processed_test <- map_dfr(test_files, ~process_dataset(.x, "Test"))
+processed_train <- map_dfr(train_files, ~process_dataset(.x, "Train"))
+processed_translation_test <- map_dfr(translation_test_files, ~process_dataset(.x, "Test"))
+processed_translation_train <- map_dfr(translation_train_files, ~process_dataset(.x, "Train"))
+
+# Merge all data
+df <- bind_rows(
+  processed_train,
+  processed_test,
+  processed_translation_train,
+  processed_translation_test
+)
 ```
 
 #### Post-processing dataset
 ```{r}
 # assign new ID
 df <- assign_new_ids(df)
-```
-
-```{r}
-# include only quantized at 4bit models
-df <- df %>%
-  filter(grepl("llama-32-3B", Model) & grepl("Q4", Model))
 ```
 
 ```{r}
@@ -303,37 +325,6 @@ df <- df %>%
 df <- df %>%
   filter(!is.na(Language)) %>%
   distinct(file_path, newId, .keep_all = TRUE)
-```
-
-```{r}
-# rename models after filtering
-model_map <- function(model) {
-  if (grepl("llama-32-3B-en-Q4-translation", model)) {
-    return("English-Translation")
-  } else if (grepl("llama-32-3B-en-es", model)) {
-    return("English-Spanish")
-  } else if (grepl("llama-32-3B-multi", model)) {
-    return("Multilanguage")
-  } else if (grepl("llama-32-3B-es", model)) {
-    return("Spanish")
-  } else if (grepl("llama-32-3B-en", model)) {
-    return("English")
-  } else {
-    return(model)
-  }
-}
-```
-
-
-```{r}
-# Rename models after filtering in df
-df$Model <- sapply(df$Model, model_map)
-```
-
-```{r}
-# remove values where Language is Multi
-df <- df %>%
-  filter(!(Language %in% c("Multi", "Eng-Spa")))
 ```
 
 ```{r}
@@ -365,6 +356,7 @@ print(na_count)
 # check how many correct values are in Correct
 table(df$Correct)
 ```
+
 ```{r}
 # remove obs with NA in label_llama
 df <- df %>%

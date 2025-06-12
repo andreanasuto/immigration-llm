@@ -16,19 +16,20 @@ library(readxl)
 
 ```{r}
 # define base directories
+setwd("/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm")
 
 # change this path to 'test_dataset_translation' to use the translated test dataset ('test_dataset')
-base_path_test <- "data/test_dataset_raw"
+base_path_test <- "model_performance/data/test_dataset_raw"
 
 # change this path to 'train_dataset_translation' to use the translated dataset ('train_dataset')
-base_path_train <- "data/train_dataset_raw"
+base_path_train <- "model_performance/data/train_dataset_raw"
 
-output_dir <- "output"
+output_dir <- "model_performance/output"
 
 # load the data with translation from the excel
-path_translation_test <- "data/test_dataset_translation"
+path_translation_test <- "model_performance/data/test_dataset_translation"
 
-path_translation_train <- "data/train_dataset_translation"
+path_translation_train <- "model_performance/data/train_dataset_translation"
 ```
 
 ```{r}
@@ -50,92 +51,101 @@ filter_languages <- FALSE
 ```
 
 ```{r}
-# Define full mapping
-full_language_map <- list(
+language_map <- list(
+  # Arabic
   "mig-ar" = "Arabic",
   "mig-ar-L3" = "Arabic",
+  "mig-ar-L3-extra" = "Arabic",
+  "ar" = "Arabic",
+
+  # Spanish
   "mig-es" = "Spanish",
   "mig-es-L3" = "Spanish",
-  "mig-en" = "English",
-  "mig-en-L3" = "English",
+  "es" = "Spanish",
+
+  # Portuguese
   "mig-pt" = "Portuguese",
   "mig-pt-L3" = "Portuguese",
+  "mig-pt-L3-extra" = "Portuguese",
+  "pt" = "Portuguese",
+
+  # French
   "mig-fr" = "French",
   "mig-fr-L3" = "French",
+  "mig-fr-L3-extra" = "French",
+  "fr" = "French",
+
+  # Italian
   "mig-it" = "Italian",
   "mig-it-L3" = "Italian",
+  "mig-it-L3-extra" = "Italian",
+  "it" = "Italian",
+
+  # German
   "mig-de" = "German",
   "mig-de-L3" = "German",
+  "de" = "German",
+
+  # Hindi
   "mig-hi" = "Hindi",
   "mig-hi-L3" = "Hindi",
-  "mig-en-es" = "Eng-Spa",
-  "mig-en-es-L3" = "Eng-Spa",
-  "mig-multi" = "Multi",
-  "mig-multi-L3" = "Multi",
+  "hi" = "Hindi",
+
+  # Hungarian
   "mig-hu" = "Hungarian",
   "mig-hu-L3" = "Hungarian",
+  "hu" = "Hungarian",
+
+  # Indonesian
   "mig-in" = "Indonesian",
   "mig-in-L3" = "Indonesian",
-  "mig-es-translation" = "Spanish Translation",
-  "mig-es-translation-L3" = "Spanish Translation",
+  "in" = "Indonesian",
+
+  # Turkish
   "mig-tr" = "Turkish",
   "mig-tr-L3" = "Turkish",
+  "mig-tr-L3-extra" = "Turkish",
+  "tr" = "Turkish",
+
+  # Polish
   "mig-pl" = "Polish",
   "mig-pl-L3" = "Polish",
-  "mig-ko-L3" = "Korean",
-  "mig-ko" = "Korean"
-)
+  "pl" = "Polish",
 
-# Define mapping for "Full" dataset (subset)
-if (dataset == "Full") {
-  language_map <- list(
-    "mig-ar" = "Arabic",
-    "mig-ar-L3" = "Arabic",
-    "mig-es" = "Spanish",
-    "mig-es-L3" = "Spanish",
-    "mig-pt" = "Portuguese",
-    "mig-pt-L3" = "Portuguese",
-    "mig-fr" = "French",
-    "mig-fr-L3" = "French",
-    "mig-it" = "Italian",
-    "mig-it-L3" = "Italian",
-    "mig-de" = "German",
-    "mig-de-L3" = "German",
-    "mig-hi" = "Hindi",
-    "mig-hi-L3" = "Hindi",
-    "mig-hu" = "Hungarian",
-    "mig-hu-L3" = "Hungarian",
-    "mig-in" = "Indonesian",
-    "mig-in-L3" = "Indonesian",
-    "mig-tr" = "Turkish",
-    "mig-tr-L3" = "Turkish",
-    "mig-pl" = "Polish",
-    "mig-pl-L3" = "Polish",
-    "mig-ko-L3" = "Korean",
-    "mig-ko" = "Korean"
-  )
-} else {
-  language_map <- full_language_map
-}
+  # Korean
+  "mig-ko" = "Korean",
+  "mig-ko-L3-extra" = "Korean",
+  "ko" = "Korean"
+)
 ```
 
 ```{r}
-# Function to extract model and dataset from filename, preserving translation if present
 extract_model_dataset <- function(filename) {
-  filename <- gsub(".csv", "", filename)
-  parts <- unlist(strsplit(filename, "_"))
+  filename_clean <- gsub(".csv", "", filename)
+  parts <- unlist(strsplit(filename_clean, "_"))
   
+  # extract model name
   model_end <- max(grep("llama", parts))
-  dataset_start <- min(grep("mig-", parts))
-  
   model <- paste(parts[1:model_end], collapse = "-")
   
+  # add translation flag if present in filename
   if (any(grepl("translation", parts))) {
     model <- paste0(model, "-translation")
   }
   
+  dataset_start <- min(grep("mig-", parts))
   dataset_code <- parts[dataset_start]
   dataset <- ifelse(dataset_code %in% names(language_map), language_map[[dataset_code]], dataset_code)
+  # read the file to extract tweet_lang values
+  #df <- read.csv(filename)
+  
+  # assume tweet_lang is uniform or use the first non-missing value
+  #lang_code <- as.character(df$tweet_lang[which(!is.na(df$tweet_lang))[1]])
+  
+  # translate to dataset using language_map
+  #dataset <- ifelse(lang_code %in% names(language_map),
+  #                  language_map[[lang_code]],
+  #                  lang_code)
   
   return(data.frame(Model = model, Dataset = dataset, stringsAsFactors = FALSE))
 }
