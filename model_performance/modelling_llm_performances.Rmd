@@ -30,6 +30,7 @@ library(tidyr)
 library(purrr)
 library(readr)
 library(stringr)
+library(broom)
 library(caret)
 library(readxl)
 library(pROC)
@@ -55,7 +56,7 @@ path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniver
 #path_translation_checked_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train/"
 
 # output path
-output_dir <- "model_performance/output"
+output_dir <- "output"
 ```
 
 ---
@@ -479,6 +480,7 @@ get_coef <- function(term) {
   }
 }
 
+
 # Build the dataset
 df_plot <- expand.grid(
   Share_Unrelated = shares,
@@ -490,6 +492,10 @@ df_plot <- expand.grid(
     main_effect = get_coef(paste0("Model", Model)),
     lang_interaction = get_coef(paste0("Model", Model, ":Language", Language)),
     share_interaction = get_coef(paste0("Model", Model, ":Share_Unrelated")),
+    # Replace NAs with 0
+    main_effect = replace_na(main_effect, 0),
+    lang_interaction = replace_na(lang_interaction, 0),
+    share_interaction = replace_na(share_interaction, 0),
     total_effect = main_effect + lang_interaction + Share_Unrelated * share_interaction,
     Accuracy = 1 / (1 + exp(-total_effect))  # logistic transformation
   )
@@ -504,14 +510,14 @@ ggplot(df_plot, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
     title = "Model Performance Across Languages and Noise Levels"
   ) +
   scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 11) +
   theme(legend.position = "top")
 
 # Save the plot
 ggsave(
   filename = "predicted_accuracy_by_language.png",
   plot = last_plot(),
-  path = "output",
+  path = 'output',
   width = 12,
   height = 8,
   dpi = 300
@@ -541,12 +547,12 @@ df_translation <- df %>%
   filter(Translation == 1)
 
 # Fit the logistic regression model
-logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
-                   data = df_translation, 
-                   family = binomial())
+#logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
+#                   data = df_translation, 
+#                   family = binomial())
 
 # Summarize the model
-summary(logit_modelxlabel)
+#summary(logit_modelxlabel)
 ```
 
 
@@ -591,7 +597,7 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
        y = "Mean Accuracy") +
   theme_minimal()
 
-# save the plot in output folder
+# save the plot in  folder
 ggsave(file.path(output_dir, "accuracy_by_language_share.png"), width = 10, height = 6)
 ```
 
