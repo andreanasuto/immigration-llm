@@ -59,19 +59,7 @@ path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniver
 output_dir <- "output"
 ```
 
----
-title: "Modelling LLM Performance"
-format: html
-execute:
-  echo: true
-  warning: false
-  message: false
----
-
 ```{r}
-# Define model name
-meta_model <- "llama-32-3B"
-
 # Get all CSV files
 test_files <- list.files(base_path_test, pattern = "\\.csv$", full.names = TRUE)
 train_files <- list.files(base_path_train, pattern = "\\.csv$", full.names = TRUE)
@@ -121,12 +109,12 @@ extract_model_dataset <- function(filename) {
     model <- base  # fallback: use whole filename if pattern unclear
   }
 
-  # Convert list to named vector (this is KEY!)
+  # Convert list to named vector
   model_map <- c(
     "llama32-3B-mig-en-es-Q4" = "English-Spanish",
     "llama32-3B-mig-en-Q4"    = "English",
     "llama32-3B-mig-es-Q4"    = "Spanish",
-    "llama32-3B-mig-multi-Q4" = "Multi"
+    "llama32-3B-mig-multi-Q4" = "Multilanguage"
   )
 
   # Lookup in named vector
@@ -251,7 +239,7 @@ is_mig_multi_or_translation <- function(file_path) {
       Model == "llama-32-3B-en-es-Q4" ~ "English-Spanish",
       Model == "llama-32-3B-en-Q4"    ~ "English",
       Model == "llama-32-3B-es-Q4"    ~ "Spanish",
-      Model == "llama-32-3B-multi-Q4" ~ "Multi",
+      Model == "llama-32-3B-multi-Q4" ~ "Multilanguage",
       TRUE ~ Model
     ))
   
@@ -322,6 +310,10 @@ df <- df %>%
 ```
 
 ```{r}
+#table(df2$Language, df2$Model)
+```
+
+```{r}
 # remove obs where Language is NA
 df <- df %>%
   filter(!is.na(Language)) %>%
@@ -380,6 +372,7 @@ df %>%
 
 table(df$Language)
 ```
+
 ```{r}
 # count number of unique observations per language
 df_unique_counts <- df %>%
@@ -450,7 +443,7 @@ summary(logit_modelxlanguage)
 ```
 
 ```{r}
-# Model 2 - Interactions Model*Language + Model*Share_Unrelated
+# Model 3 - Interactions Model*Language + Model*Share_Unrelated
 # Fit the logistic regression model
 logit_modelxShareUnrelated <- glm(Correct ~ Model*Language + Model*Share_Unrelated + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)
                    data = df, 
@@ -480,7 +473,6 @@ get_coef <- function(term) {
   }
 }
 
-
 # Build the dataset
 df_plot <- expand.grid(
   Share_Unrelated = shares,
@@ -493,9 +485,9 @@ df_plot <- expand.grid(
     lang_interaction = get_coef(paste0("Model", Model, ":Language", Language)),
     share_interaction = get_coef(paste0("Model", Model, ":Share_Unrelated")),
     # Replace NAs with 0
-    main_effect = replace_na(main_effect, 0),
-    lang_interaction = replace_na(lang_interaction, 0),
-    share_interaction = replace_na(share_interaction, 0),
+    #main_effect = replace_na(main_effect, 0),
+    #lang_interaction = replace_na(lang_interaction, 0),
+    #share_interaction = replace_na(share_interaction, 0),
     total_effect = main_effect + lang_interaction + Share_Unrelated * share_interaction,
     Accuracy = 1 / (1 + exp(-total_effect))  # logistic transformation
   )
@@ -526,7 +518,7 @@ ggsave(
 
 
 ```{r}
-# Model 3 - Interactions Model*label
+# Model 4 - Interactions Model*label
 # Fit the logistic regression model
 logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
                    data = df, 
@@ -560,7 +552,7 @@ df_translation <- df %>%
 # create log of LangShare
 df$LogLangShare <- log1p(df$LangShare)
 
-# Model 4 - Interactions Model*LogLangShare
+# Model 5 - Interactions Model and Language Share from LLAMA 2
 logit_model_interact <- glm(Correct ~ Model*LangShare + Language + label + Train_Test + TranslationQuality + label,
                             data = df,
                             family = binomial())
