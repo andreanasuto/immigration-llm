@@ -1,0 +1,22 @@
+"","neutral","anti-immigration","pro-immigration","unrelated"
+"neutral",505,77,133,337
+"anti-immigration",147,627,137,164
+"pro-immigration",73,25,661,64
+"unrelated",109,93,33,2065
+
+
+Language-Level Misclassification Summary:
+
+"Model","Dataset","Language","Tweets","Pro_as_Anti_Count","Pro_as_Anti_Perc","Anti_as_Pro_Count","Anti_as_Pro_Perc"
+"English","Train","Arabic",150,10,29.41,0,0
+"English","Train","English",2250,36,6.57,11,3.11
+"English","Train","French",150,4,9.52,0,0
+"English","Train","German",150,12,46.15,0,0
+"English","Train","Hindi",150,0,0,0,0
+"English","Train","Hungarian",150,2,16.67,2,6.25
+"English","Train","Indonesian",150,0,0,0,0
+"English","Train","Italian",150,6,42.86,0,0
+"English","Train","Polish",150,8,33.33,0,0
+"English","Train","Portuguese",150,14,43.75,0,0
+"English","Train","Spanish",1500,45,20.83,4,2.04
+"English","Train","Turkish",150,0,0,8,19.05

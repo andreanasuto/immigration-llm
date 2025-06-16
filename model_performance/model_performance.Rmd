@@ -207,7 +207,6 @@ process_conf_matrix <- function(file_path) {
 
   # Safely compute confusion matrix
   cm <- tryCatch(
-    confusionMatrix(table(data$label_llama, data$label), mode = "everything"),
     error = function(e) {
       message("Error in confusionMatrix for: ", file_path)
       message("Error: ", e$message)

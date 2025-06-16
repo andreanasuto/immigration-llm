@@ -634,6 +634,161 @@ coefficients_table <- df_summary %>%
 print(coefficients_table)
 ```
 
+#### Confusion Matrix and Confidence Intervals
+```{r}
+# Filter out translation data and separate train/test sets
+df_non_translation <- df %>% filter(Translation == 0)
+
+df_test <- df_non_translation %>% filter(Train_Test == "Test")
+df_train <- df_non_translation %>% filter(Train_Test == "Train")
+```
+
+```{r}
+# Function to calculate accuracy and 95% CI
+compute_accuracy_ci <- function(data) {
+  cm <- confusionMatrix(as.factor(data$label_llama), as.factor(data$label))
+  accuracy <- cm$overall["Accuracy"]
+  ci <- prop.test(cm$table %>% diag() %>% sum(), sum(cm$table))$conf.int
+  return(tibble(
+    Accuracy = accuracy,
+    Accuracy_Lower = ci[1],
+    Accuracy_Upper = ci[2]
+  ))
+}
+```
+
+```{r}
+# Helper function to apply to each dataset split
+generate_accuracy_df <- function(df_split, dataset_name) {
+  df_split %>%
+    group_by(Model, Language) %>%
+    group_map(~{
+      acc <- compute_accuracy_ci(.x)
+      acc$Model <- .y$Model
+      acc$Language <- .y$Language
+      acc$Dataset <- dataset_name
+      acc
+    }) %>%
+    bind_rows()
+}
+```
+
+```{r}
+generate_and_save_cm <- function(data, title) {
+  models <- unique(data$Model)
+  results <- list()
+
+  for (model in models) {
+    model_data <- data[data$Model == model, ]
+
+    # Compute overall confusion matrix
+    cm <- confusionMatrix(as.factor(model_data$label_llama), as.factor(model_data$label))
+    cm_matrix <- as.matrix(cm$table)
+
+    # Output file path
+    filename <- paste0("output/confusion_matrix_", model, "_", title, ".csv")
+
+    # Write confusion matrix to file
+    write.csv(cm_matrix, filename, row.names = TRUE)
+
+    # Prepare summary rows (language-level misclassification)
+    languages <- unique(model_data$Language)
+    model_summary <- list()
+
+    for (lang in languages) {
+      lang_data <- model_data[model_data$Language == lang, ]
+      total_pro <- sum(lang_data$label == "pro-immigration")
+      total_anti <- sum(lang_data$label == "anti-immigration")
+      total_tweets <- nrow(lang_data)
+
+      pro_as_anti <- sum(lang_data$label == "pro-immigration" & lang_data$label_llama == "anti-immigration")
+      anti_as_pro <- sum(lang_data$label == "anti-immigration" & lang_data$label_llama == "pro-immigration")
+
+      model_summary[[lang]] <- tibble(
+        Model = model,
+        Dataset = title,
+        Language = lang,
+        Tweets = total_tweets,
+        Pro_as_Anti_Count = pro_as_anti,
+        Pro_as_Anti_Perc = ifelse(total_pro > 0, round(100 * pro_as_anti / total_pro, 2), NA),
+        Anti_as_Pro_Count = anti_as_pro,
+        Anti_as_Pro_Perc = ifelse(total_anti > 0, round(100 * anti_as_pro / total_anti, 2), NA)
+      )
+    }
+
+    # Combine language-level summaries
+    summary_df <- bind_rows(model_summary)
+
+    # Append empty lines, then summary to the same CSV
+    write("\n\nLanguage-Level Misclassification Summary:\n", file = filename, append = TRUE)
+    suppressMessages(write.table(summary_df, file = filename, sep = ",", row.names = FALSE, append = TRUE, col.names = TRUE))
+
+    # Add to final return object
+    results[[model]] <- summary_df
+  }
+
+  bind_rows(results)
+}
+```
+
+
+```{r}
+# Generate accuracy stats for both datasets
+accuracy_test <- generate_accuracy_df(df_test, "Test")
+accuracy_train <- generate_accuracy_df(df_train, "Train")
+
+# combine into one dataframe
+#accuracy_data <- bind_rows(accuracy_test, accuracy_train)
+```
+
+```{r}
+# save confusion matrix dataset
+generate_and_save_cm(df_test, "Test")
+generate_and_save_cm(df_train, "Train")
+```
+
+```{r}
+# dynamic title for the chart
+chart_title <- paste("Accuracy Confidence Intervals for", dataset, "Dataset")
+
+# function to create accuracy confidence interval plots
+plot_accuracy_intervals <- function(data, title) {
+  ggplot(data, aes(x = Language, ymin = Accuracy_Lower, ymax = Accuracy_Upper, color = Model, fill = Model)) +
+    geom_errorbar(width = 0.3, position = position_dodge(width = 0.6)) +
+    geom_point(aes(y = (Accuracy_Lower + Accuracy_Upper) / 2), size = 3, position = position_dodge(width = 0.6)) +
+    scale_x_discrete(labels = function(x) ifelse(x %in% names(language_map), language_map[[x]], x)) +
+    labs(title = title,
+         x = "Language",
+         y = "Accuracy Confidence Interval",
+         color = "Model",
+         fill = "Model") +
+    theme_minimal() +
+    theme(legend.position = "bottom",
+          panel.background = element_rect(fill = "white", color = NA),
+          plot.background = element_rect(fill = "white", color = NA),
+          legend.title = element_text(size = 12, face = "bold"),
+          legend.text = element_text(size = 10),
+          axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # save the plot
+  ggsave(filename = paste0(chart_title, ".png"),
+         path = 'output',
+         width = 10, height = 6, dpi = 300)
+}
+
+```
+
+```{r}
+# plot 'Test' set confidence inervals
+chart_title <- "Accuracy Confidence Intervals by Language and Dataset (Test)"
+plot_accuracy_intervals(accuracy_test, chart_title)
+```
+
+```{r}
+# plot 'Train' set confidence inervals
+chart_title <- "Accuracy Confidence Intervals by Language and Dataset (Train)"
+plot_accuracy_intervals(accuracy_train, chart_title)
+```
 
 #### Multilevel Models
 ```{r}
