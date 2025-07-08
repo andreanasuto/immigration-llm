@@ -36,6 +36,8 @@ library(readxl)
 library(pROC)
 library(rpart)
 library(rpart.plot)
+library(viridis)
+library(showtext)
 ```
 
 ```{r}
@@ -452,7 +454,7 @@ logit_modelxShareUnrelated <- glm(Correct ~ Model*Language + Model*Share_Unrelat
 # Summarize the model
 summary(logit_modelxShareUnrelated)
 ```
-###### Visualization of the interaction Model x Language + Model x Share of Unrelated
+Visualization of the interaction Model x Language + Model x Share of Unrelated
 ```{r}
 # Define your languages and models
 languages <- c("Turkish", "Spanish", "Portuguese", "Polish", "Korean", "Italian",
@@ -474,7 +476,7 @@ get_coef <- function(term) {
 }
 
 # Build the dataset
-df_plot <- expand.grid(
+df_plot_model3 <- expand.grid(
   Share_Unrelated = shares,
   Language = languages,
   Model = models
@@ -492,16 +494,20 @@ df_plot <- expand.grid(
     Accuracy = 1 / (1 + exp(-total_effect))  # logistic transformation
   )
 
-# Plot
-ggplot(df_plot, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
+ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
   geom_line(size = 1.1) +
   facet_wrap(~ Language, ncol = 4) +
   labs(
     x = "Share of Unrelated Tweets",
-    y = "Accuracy", # or Log-Odds
-    title = "Model Performance Across Languages and Noise Levels"
+    y = "Accuracy",
+    title = "LLMs Accuracy Performances Across Languages and Share of Unrelated Content"
   ) +
   scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_color_manual(values = c(
+    "#E69F00", # orange
+    "#56B4E9", # sky blue
+    "#009E73"  # bluish green
+  )) +
   theme_minimal(base_size = 11) +
   theme(legend.position = "top")
 
@@ -515,8 +521,74 @@ ggsave(
   dpi = 300
 )
 ```
+```{r}
+# Define your languages and models
+languages <- c("Turkish", "Spanish", "Portuguese", "Polish", "Korean", "Italian",
+               "Indonesian", "Hungarian", "Hindi", "German", "French", "Arabic")
+models <- c("English", "English-Spanish", "Multilanguage", "Spanish")
+shares <- seq(0, 1, 0.1)
+train_test_val <- "Test"
+translation_quality_val <- "Unknown"
 
+# Extract coefficients from the model summary
+coefs <- coef(logit_modelxShareUnrelated)
+coef_names <- names(coefs)
 
+# Function to get coefficient or return 0 if not found
+get_coef <- function(term) {
+  if (term %in% coef_names) {
+    return(coefs[term])
+  } else {
+    return(0)
+  }
+}
+
+# Build the dataset
+df_plot_model3 <- expand.grid(
+  Share_Unrelated = shares,
+  Language = languages,
+  Model = models
+) %>%
+  rowwise() %>%
+  mutate(
+    main_effect = ifelse(Model == "English", 0, get_coef(paste0("Model", Model))),
+    lang_main = get_coef(paste0("Language", Language)),
+    lang_interaction = ifelse(Model == "English", 0, get_coef(paste0("Model", Model, ":Language", Language))),
+    share_main = get_coef("Share_Unrelated"),
+    share_interaction = ifelse(Model == "English", 0, get_coef(paste0("Model", Model, ":Share_Unrelated"))),
+    intercept = get_coef("(Intercept)"),
+    total_effect = intercept +
+                   lang_main +
+                   share_main * Share_Unrelated +
+                   main_effect +
+                   lang_interaction +
+                   Share_Unrelated * share_interaction,
+    Accuracy = 1 / (1 + exp(-total_effect))  # logistic transformation
+  )
+
+# Plot
+p <- ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
+  geom_line(size = 1.1) +
+  facet_wrap(~ Language, ncol = 4) +
+  labs(
+    x = "Share of Unrelated Tweets",
+    y = "Accuracy",
+    title = "LLMs Accuracy Performances Across Languages and Share of Unrelated Content"
+  ) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_color_manual(values = c(
+    "English" = "#D55E00",           # red-orange for baseline
+    "English-Spanish" = "#E69F00",  # orange
+    "Multilanguage" = "#56B4E9",    # sky blue
+    "Spanish" = "#009E73"           # bluish green
+  )) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "top")
+
+print(p)
+```
+
+Model 4
 ```{r}
 # Model 4 - Interactions Model*label
 # Fit the logistic regression model
@@ -533,6 +605,104 @@ Idea - to test if the Multilanguage adds noise, we keep the language constant (E
 The results below seems to show that even when we use only tweets in English, the Multilanguage model performs worse than English-Spanish Model and Spanish Model in classifying unrelated tweets.
 This seems to suggest that Multilanguage model is worse when it comes to classifying unrelated tweets, even when we use only tweets in English.
 
+Create heatmaps of Model 4 results across labels ana languages
+
+```{r}
+# Define models, languages, and labels
+languages <- c("Turkish", "Spanish", "Portuguese", "Polish", "Korean", "Italian",
+               "Indonesian", "Hungarian", "Hindi", "German", "French", "Arabic")
+models <- c("English-Spanish", "Multilanguage", "Spanish", "English")
+labels <- c("Neutral", "Anti-immigration", "Pro-immigration", "Unrelated")
+
+# Get coefficients
+coefs <- coef(logit_modelxlabel)
+coef_names <- names(coefs)
+
+# Function to extract coefficient or return 0
+get_coef <- function(term) {
+  if (term %in% coef_names) return(coefs[term]) else return(0)
+}
+
+# Average language effect (approximate for 'LanguageEnglish')
+get_lang_coef <- function(language) {
+  term <- paste0("Language", language)
+  return(get_coef(term))
+}
+
+# Main label effect
+get_label_coef <- function(label) {
+  if (label == "Neutral") return(0)
+  return(get_coef(paste0("label", gsub("-", "", label))))
+}
+
+# Model × Label interaction
+get_model_label_interaction <- function(model, label) {
+  term <- paste0("Model", model, ":label", gsub("-", "", label))
+  return(get_coef(term))
+}
+
+# Build full table of predictions
+df_plot_heatmap <- expand.grid(Language = languages, Model = models, Label = labels) %>%
+  rowwise() %>%
+  mutate(
+    intercept = get_coef("(Intercept)"),
+    model_coef = get_coef(paste0("Model", Model)),
+    label_coef = get_label_coef(Label),
+    model_label_interaction = get_model_label_interaction(Model, Label),
+    language_coef = get_lang_coef(Language),
+    test_coef = get_coef("Train_TestTest"),
+    total_eta = intercept + model_coef + label_coef + model_label_interaction + language_coef + test_coef,
+    Accuracy = 1 / (1 + exp(-total_eta))
+  ) %>%
+  ungroup()
+
+# Load the font (only needs to be run once per session)
+font_add_google("Roboto Condensed", "roboto")
+showtext_auto()
+
+# Plot
+ggplot(df_plot_heatmap, aes(x = Model, y = Language, fill = Accuracy)) +
+  geom_tile(color = "white") +
+  geom_text(
+    aes(label = sprintf("%.1f", Accuracy * 100)),
+    size = 3.2,
+    family = "roboto",
+    color = "white" # change color of the text
+  ) +
+  facet_wrap(~Label, ncol = 2) +
+  scale_fill_viridis(
+    name = "Accuracy",
+    option = "D",
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "Model 4 Accuracy Across Labels and Languages",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12, base_family = "roboto") +
+  theme(
+    legend.position = "right",
+    strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(size = 10),
+    axis.title = element_blank(),
+    plot.title = element_text(face = "bold", size = 14, margin = margin(b = 10))
+  )
+
+# Save the plot
+ggsave(
+  filename = "predicted_accuracy_by_labels_language.png",
+  plot = last_plot(),
+  path = 'output',
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+
+```
+
+Translated only observation analysis
 ```{r}
 # select only tweets classified based on the translation
 df_translation <- df %>%
@@ -547,7 +717,7 @@ df_translation <- df %>%
 #summary(logit_modelxlabel)
 ```
 
-
+Understand how pretraining impacts accuracy performances
 ```{r}
 # create log of LangShare
 df$LogLangShare <- log1p(df$LangShare)
@@ -590,7 +760,7 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
   theme_minimal()
 
 # save the plot in  folder
-ggsave(file.path(output_dir, "accuracy_by_language_share.png"), width = 10, height = 6)
+#ggsave(file.path(output_dir, "accuracy_by_language_share.png"), width = 10, height = 6)
 ```
 
 ```{r}
@@ -620,7 +790,7 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Language)) +
   theme_minimal()
 
 # save the plot in output folder
-ggsave(file.path(output_dir, "accuracy_vs_language_share_by_model.png"), width = 10, height = 6)
+#ggsave(file.path(output_dir, "accuracy_vs_language_share_by_model.png"), width = 10, height = 6)
 ```
 
 ```{r}

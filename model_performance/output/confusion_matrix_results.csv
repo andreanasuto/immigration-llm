@@ -1,0 +1,17 @@
+Prediction,Reference,Freq
+neutral,neutral,21
+anti-immigration,neutral,2
+pro-immigration,neutral,2
+unrelated,neutral,24
+neutral,anti-immigration,53
+anti-immigration,anti-immigration,30
+pro-immigration,anti-immigration,8
+unrelated,anti-immigration,56
+neutral,pro-immigration,5
+anti-immigration,pro-immigration,2
+pro-immigration,pro-immigration,3
+unrelated,pro-immigration,6
+neutral,unrelated,21
+anti-immigration,unrelated,5
+pro-immigration,unrelated,4
+unrelated,unrelated,208

@@ -19,10 +19,10 @@ library(readxl)
 setwd("/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm")
 
 # change this path to 'test_dataset_translation' to use the translated test dataset ('test_dataset')
-base_path_test <- "model_performance/data/test_dataset_raw"
+base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/test_dataset_raw"
 
 # change this path to 'train_dataset_translation' to use the translated dataset ('train_dataset')
-base_path_train <- "model_performance/data/train_dataset_raw"
+base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/train_dataset_raw"
 
 output_dir <- "model_performance/output"
 
@@ -207,6 +207,7 @@ process_conf_matrix <- function(file_path) {
 
   # Safely compute confusion matrix
   cm <- tryCatch(
+    confusionMatrix(data$label_llama, data$label),
     error = function(e) {
       message("Error in confusionMatrix for: ", file_path)
       message("Error: ", e$message)
