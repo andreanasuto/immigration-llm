@@ -1,4 +1,4 @@
-# Learning the Topic, Not the Language (2025)
+# Learning the Topic, Not the Language (2026)
 # README 📘
 
 ## Project Overview 📂
