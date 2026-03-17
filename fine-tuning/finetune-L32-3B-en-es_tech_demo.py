@@ -74,17 +74,17 @@ quant_config = BitsAndBytesConfig(
                                             # Set True if you need even more memory savings
 )
 
-# Device selection
+# Device selection: CPU or GPU (cuda)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 # ============================================================================
-# MODEL LOADING & PREPARATION
+# BASE MODEL LOADING & PREPARATION
 # ============================================================================
 
-# Load pre-trained model with quantization
+# Load pretrained model with quantization - eg. LLAMA 3.1 - 3B with 4bit precision and other specifics quant_config
 model = AutoModelForCausalLM.from_pretrained(
     base_model,
-    quantization_config=quant_config,
+    quantization_config=quant_config, # use the configuration setup above using BitsAndBytes
     device_map={"": 0},  # Load entire model on GPU 0
                          # For multi-GPU: use "auto" or specific mapping
 )
@@ -121,11 +121,13 @@ learning_rate = 2e-4
 gradient_accumulation_steps = 1
 
 # Batch Size
+# WHAT: how many samples are given to GPU per step
 # WHY 16? Balances training speed and memory usage for 3B model
 # ADJUST: Reduce to 8 or 4 if OOM errors occur
 per_device_train_batch_size = 16
 
 # Training Duration
+# WHAT: how many times the 
 # WHY 10 epochs? Enough for domain adaptation without overfitting
 # MONITOR: Use validation loss to determine if more/fewer epochs needed
 num_train_epochs = 10
