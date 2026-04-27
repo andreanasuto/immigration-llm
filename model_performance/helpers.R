@@ -246,6 +246,15 @@ add_language_share <- function(df) {
     mutate(LangShare = dplyr::coalesce(LangShare, 0))
 }
 
+add_dataset_size <- function(df) {
+  df %>%
+    group_by(Language, Train_Test, Translation, TranslationQuality) %>%
+    mutate(
+      DatasetSize = n_distinct(newId)
+    ) %>%
+    ungroup()
+}
+
 set_reference_levels <- function(df) {
   df %>%
     mutate(
@@ -412,6 +421,36 @@ tidy_translation_label_terms <- function(model) {
         !is.na(label_class)                       ~ label_class,
         !is.na(model_label)                       ~ model_label,
         TRUE ~ tools::toTitleCase(gsub("^Model|^label|^Language|^Train_Test|^TranslationQuality", "", term))
+      )
+    ) %>%
+    add_significance_columns() %>%
+    arrange(variable_group, desc(abs_estimate))
+}
+
+tidy_dataset_size_terms <- function(model) {
+  broom::tidy(model, conf.int = TRUE) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      variable_group = case_when(
+        str_starts(term, "Model")              ~ "Model",
+        str_starts(term, "Language")           ~ "Language",
+        str_starts(term, "TranslationQuality") ~ "Translation",
+        str_starts(term, "label")              ~ "Label",
+        term == "DatasetSize"                  ~ "Dataset Size",
+        TRUE                                   ~ "Other"
+      ),
+      clean_term = case_when(
+        variable_group == "Model"        ~ str_remove(term, "^Model"),
+        variable_group == "Language"     ~ str_remove(term, "^Language"),
+        variable_group == "Translation"  ~ str_remove(term, "^TranslationQuality"),
+        variable_group == "Dataset Size" ~ "Dataset Size",
+        variable_group == "Label"        ~ case_when(
+          str_detect(term, "unrelated") ~ "Unrelated",
+          str_detect(term, "anti")      ~ "Anti-Immigration",
+          str_detect(term, "pro")       ~ "Pro-Immigration",
+          TRUE                          ~ str_remove(term, "^label")
+        ),
+        TRUE                             ~ term
       )
     ) %>%
     add_significance_columns() %>%

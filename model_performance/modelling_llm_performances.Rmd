@@ -59,6 +59,7 @@ library(sysfonts)
 library(forcats)
 library(scales)
 library(lme4)
+library(car)
 
 # load fonts and helper functions
 base_family <- "sans"
@@ -70,6 +71,13 @@ try({
 }, silent = TRUE)
 
 source("/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/helpers.R")
+
+safe_vif <- function(model_object) {
+  tryCatch(
+    car::vif(model_object),
+    error = function(e) paste("VIF not available:", e$message)
+  )
+}
 ```
 
 ```{r}
@@ -96,7 +104,8 @@ df <- build_combined_dataset(
 ) %>%
   prepare_modelling_dataset() %>%
   add_share_unrelated() %>%
-  add_language_share()
+  add_language_share() %>%
+  add_dataset_size()
 ```
 
 ## Descriptive Statistics
@@ -169,6 +178,11 @@ summary(baseline_glm)
 ```
 
 ```{r}
+# inspect multicollinearity in Model 1
+safe_vif(baseline_glm)
+```
+
+```{r}
 # prepare coefficient output for the baseline coefficient plot
 baseline_results <- tidy_baseline_terms(baseline_glm)
 ```
@@ -234,6 +248,11 @@ model_language_glm <- glm(
 
 # summarise the model
 summary(model_language_glm)
+```
+
+```{r}
+# inspect multicollinearity in Model 2
+safe_vif(model_language_glm)
 ```
 
 ```{r}
@@ -350,6 +369,11 @@ summary(share_unrelated_glm)
 ```
 
 ```{r}
+# inspect multicollinearity in Model 3
+safe_vif(share_unrelated_glm)
+```
+
+```{r}
 # create a prediction grid to visualise how accuracy changes with label composition
 df_plot_model3 <- expand.grid(
   Share_Unrelated = seq(min(df$Share_Unrelated, na.rm = TRUE), max(df$Share_Unrelated, na.rm = TRUE), length.out = 100),
@@ -463,6 +487,11 @@ translated_label_glm <- glm(
 )
 
 summary(translated_label_glm)
+```
+
+```{r}
+# inspect multicollinearity in Model 4
+safe_vif(translated_label_glm)
 ```
 
 ```{r}
@@ -639,6 +668,11 @@ summary(logit_model_interact)
 ```
 
 ```{r}
+# inspect multicollinearity in Model 5
+safe_vif(logit_model_interact)
+```
+
+```{r}
 # convert the outcome to numeric
 df$Correct_Num <- as.numeric(as.character(df$Correct))
 
@@ -714,6 +748,112 @@ coefficients_table <- df_summary %>%
 
 print(coefficients_table)
 ```
+
+### Model 6
+
+Reviewer concern: differences in performance might partly reflect the size of the evaluation dataset available for each language and translation condition rather than only genuine model or language effects. To test that possibility, this model adds a dataset-size covariate measured as the number of unique tweets (`newId`) available in each `Language × Train_Test × Translation × TranslationQuality` cell.
+
+```{r}
+# inspect the size of each evaluation cell used in the size-adjusted model
+dataset_size_summary <- df %>%
+  group_by(Language, Train_Test, Translation, TranslationQuality) %>%
+  summarise(
+    DatasetSize = first(DatasetSize),
+    Accuracy = mean(as.numeric(as.character(Correct))),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(DatasetSize))
+
+dataset_size_summary
+```
+
+```{r}
+# add raw dataset size to the baseline specification
+dataset_size_glm <- glm(
+  Correct ~ Model + Language + Train_Test + TranslationQuality + label + DatasetSize,
+  data = df,
+  family = binomial()
+)
+
+summary(dataset_size_glm)
+```
+
+```{r}
+# inspect multicollinearity in Model 6
+safe_vif(dataset_size_glm)
+```
+
+```{r}
+# compare the size-adjusted model against the baseline specification
+model6_comparison <- full_join(
+  tidy(baseline_glm) %>%
+    select(term, estimate_baseline = estimate, p_baseline = p.value),
+  tidy(dataset_size_glm) %>%
+    select(term, estimate_model6 = estimate, p_model6 = p.value),
+  by = "term"
+)
+
+model6_fit_summary <- tibble(
+  Model = c("Baseline", "Model 6"),
+  AIC = c(AIC(baseline_glm), AIC(dataset_size_glm))
+)
+
+dataset_size_effect <- tidy(dataset_size_glm, conf.int = TRUE) %>%
+  filter(term == "DatasetSize") %>%
+  mutate(
+    odds_ratio_per_tweet = exp(estimate),
+    odds_ratio_per_100_tweets = exp(estimate * 100),
+    odds_ratio_low_per_100_tweets = exp(conf.low * 100),
+    odds_ratio_high_per_100_tweets = exp(conf.high * 100)
+  )
+
+model6_comparison
+model6_fit_summary
+dataset_size_effect
+```
+
+```{r}
+# prepare coefficient output for the size-adjusted model plot
+model6_results <- tidy_dataset_size_terms(dataset_size_glm)
+
+model6_plot <- model6_results %>%
+  mutate(
+    clean_term = fct_reorder(clean_term, estimate),
+    variable_group = fct_reorder(variable_group, abs_estimate, .fun = median)
+  ) %>%
+  ggplot(aes(x = estimate, y = clean_term, color = variable_group)) +
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.7, linewidth = 0.5) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.25, alpha = 0.8, linewidth = 0.6) +
+  geom_point(size = 2.2, alpha = 0.9) +
+  facet_wrap(~variable_group, scales = "free_y", ncol = 1, strip.position = "left") +
+  scale_color_manual(
+    values = c(
+      "Model" = cb_palette[1],
+      "Language" = cb_palette[5],
+      "Translation" = cb_palette[6],
+      "Label" = cb_palette[3],
+      "Dataset Size" = cb_palette[8]
+    ),
+    guide = "none"
+  ) +
+  labs(
+    x = "Coefficient Estimates",
+    y = NULL
+  ) +
+  theme_minimal(base_family = base_family) +
+  theme(
+    strip.text = element_text(size = 11, face = "bold"),
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    axis.title.x = element_text(size = 13, margin = margin(t = 12)),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave(filename = "model6_dataset_size_plot.png", plot = model6_plot, path = output_dir, width = 10, height = 7, dpi = 300)
+model6_plot
+```
+
+The size-adjusted results show a positive coefficient for `DatasetSize`, meaning that larger evaluation cells are associated with higher accuracy on average. In this raw-size specification, the effect is statistically clear and the model fit improves relative to the baseline. At the same time, the main model-family coefficients remain effectively unchanged. This suggests that dataset size does explain part of the variation in performance, but it does not explain away the substantive differences between the `English`, `English-Spanish`, `Spanish`, and `Multilanguage` models.
 
 ## Confusion Matrix and Confidence Intervals
 ```{r}
