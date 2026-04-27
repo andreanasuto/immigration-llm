@@ -1,52 +1,172 @@
-# Learning the Topic, Not the Language (2026)
-# README 📘
+# Learning the Topic, Not the Language
 
-## Project Overview 📂
+This repository contains the code used to build, fine-tune, run, validate, and analyse large language models for immigration-related tweet classification. The project is organised as a research workflow rather than a packaged software library: data are prepared for instruction tuning, models are fine-tuned and merged, quantized models are run on an HPC cluster for large-scale inference, and the resulting outputs are analysed in R.
 
-This project is set up to help fine-tune machine learning models and run tasks on a high-performance computing (HPC) system. Below is an outline of the key parts of this repository.
+## What the project does
 
-### `fine-tuning` 🎯📝🔧
+The core task is four-class classification of tweets into:
 
-This folder contains scripts that help train models to perform better. It includes:
+- `pro-immigration`
+- `anti-immigration`
+- `neutral`
+- `unrelated`
 
-- **Creating Training and Test Datasets**: Scripts that prepare data for training and testing of the models.
-- **Fine-tune Model**: Scripts that run the fine-tuning for different type of datasets and source model (eg. Llama 3.2 - 3B)  
-- **Merging Model Weights**: The `merge_weights.py` script combines the weights from an existing model with the fine-tuned version to improve performance.
+Across the repository, the code supports five linked stages:
 
-### `hpc` 🖥️🚀⚡
+1. Create train/test datasets for instruction tuning.
+2. Fine-tune Llama-based models on one or more language datasets.
+3. Merge LoRA adapters back into a base model and export deployable weights.
+4. Run batch classification and validation jobs on HPC using GGUF models.
+5. Compare model performance across languages, translations, labels, and train/test splits.
 
-This folder has the necessary code for running model training and validation on an HPC system. We used FASRC HPC at Harvard thus the following code is compatible with that.
-It is divided into two sections:
+## Repository structure
 
-#### `classification` 📊📑🔍
+### `fine-tuning/`
 
-- Contains SLURM (`.sbatch`) scripts for submitting jobs to the HPC system.
-- Includes Python scripts that handle classification tasks on the cluster.
+Python scripts for dataset construction and supervised fine-tuning.
 
-#### `classification USA` 📊📑🔍
-- bash code (`.sh`) to handle multiple sbatch submissions by specifying the year, month, number of jobs to launch, and maximum time for each job.
-Usage: `bash gpu_tweet_usa.sh {YEAR} {MONTH} {NUM_JOBS} {TIME}`
-Example: `bash gpu_tweet_usa.sh {2022} {2} {20} {00:30:00}`
-This command will start classifying datasets for Feb 2022 by launching 20 sbatch/jobs, each with a runtime of 30 minutes.
-- Contains SLURM (`.sbatch`) scripts for submitting jobs to the HPC system.
-- Includes Python scripts that handle classification tasks on the cluster.
+- `generate_training_test_dataset.py`
+  Builds Hugging Face train/test datasets from labelled tweet data, formats prompts in instruction style, and pushes datasets to the Hugging Face Hub.
+- `finetune-L32-3B-en-es.py`
+  Fine-tunes `meta-llama/Llama-3.2-3B-Instruct` with LoRA/QLoRA-style settings on combined language datasets from Hugging Face.
+- `finetune-L32-3B-en-es_tech_demo.py`
+  Variant of the fine-tuning workflow used for technical demos or alternate runs.
+- `merge_weights.py`
+  Loads a base model plus LoRA adapters and merges them into a standalone model directory for downstream inference.
 
-#### `validation` ✅🔬📉
+### `hpc/`
 
-- Similar to the classification section but focused on testing and verifying model accuracy.
+Cluster-oriented scripts used to run inference and validation jobs on Harvard FASRC-style infrastructure.
 
-## How to Use 🔄
+#### `hpc/classification/`
 
-1. **Fine-Tuning Process**
+Large-scale tweet classification over compressed tweet archives.
 
-   - Generate the training and test datasets and upload them to Hugging Face.
-   - Fine-tune the model to improve its performance.
-   - Use `merge_weights.py` to combine the improved weights with the original model.
+- `gpu_tweet_jobs.sh`
+  Iterates over source `.csv.gz` tweet files and submits one SLURM job per file.
+- `process_tweets_gpu_gguf.sbatch`
+  SLURM wrapper used to launch the classifier on the cluster.
+- `classify_tweets_gguf.py`
+  Loads a GGUF model through `llama_cpp`, classifies tweets one by one, saves checkpoints, and writes per-file outputs.
 
-2. **Running Tasks on the FASRC System**
+#### `hpc/classification_usa/`
 
-   - Submit bash command `gpu_tweet_jobs.sh` by selecting 'year' and/or 'month' - eg. `bash gpu_tweet_jobs 2022 1`
-   - Submit classification jobs using SLURM `.sbatch` scripts.
-   - Make sure the Python scripts are set up correctly for smooth execution on the FASRC cluster.
+US-specific batch inference scripts.
 
-For more details, check the comments and explanations inside each script. 📖
+- `gpu_tweet_usa.sh`
+  Job launcher for USA datasets with explicit control over year, month, number of jobs, and wall time.
+- `process_tweets_gpu_gguf_usa.sbatch`
+  SLURM wrapper for the USA pipeline.
+- `classify_tweets_gguf_usa.py`
+  Classifier script for the USA workflow.
+- `combine_usa_tweets_test.py`
+  Utility for combining or post-processing USA output files.
+
+#### `hpc/validation/`
+
+Validation jobs run on cluster infrastructure.
+
+- `validation_all.py`
+  Evaluates one or more GGUF models against Hugging Face datasets, computes accuracy and weighted F1, and saves per-model outputs.
+- `validation.sbatch`
+  SLURM entry point for validation jobs.
+
+### `model_performance/`
+
+R-based comparative performance analysis for the paper/notebook workflow.
+
+- `modelling_llm_performances.Rmd`
+  Main analysis notebook. It builds a unified modelling dataset from raw and translated outputs, estimates several logistic models, produces descriptive summaries, creates coefficient plots and heatmaps, and exports performance tables.
+- `helpers.R`
+  Helper functions for loading model output files, standardising metadata, computing accuracy intervals, generating confusion matrices, and building derived quantities used in the notebook.
+- `data/`
+  Input files for the modelling notebook, including raw train/test classifications and translated evaluation files.
+- `output/`
+  Figures and tables generated by the notebook.
+- `README.md`
+  Folder-specific notes for the performance analysis workflow.
+
+### `validation/`
+
+Older standalone R scripts for validation summaries and visual diagnostics.
+
+- `model_confusion_matrices.R`
+  Computes and saves confusion matrices and heatmaps from classified outputs.
+- `model_accuracy_ci.R`
+  Computes and plots accuracy confidence intervals by model and dataset.
+
+These scripts overlap conceptually with the newer `model_performance/` workflow, but are kept as separate analysis utilities.
+
+### `paper/`
+
+Paper-related bibliography and reference material.
+
+- `ref.bib`
+  Bibliography used in writing.
+- `doi_10.7910_DVN_3NCMB6.ris`
+  Reference export file.
+
+### `helpers.R` (repository root)
+
+General R helpers for a separate multimodel inference pipeline. This file is not the main helper file for the immigration classification notebook; that logic lives in `model_performance/helpers.R`.
+
+## Typical workflow
+
+### 1. Build datasets
+
+Use `fine-tuning/generate_training_test_dataset.py` to:
+
+- load manually labelled tweet data
+- map labels to numeric class codes
+- format instruction-tuning prompts
+- split into train/test sets
+- publish the datasets to Hugging Face
+
+### 2. Fine-tune a model
+
+Use one of the scripts in `fine-tuning/` to:
+
+- load `meta-llama/Llama-3.2-3B-Instruct`
+- combine one or more language datasets
+- train LoRA adapters
+- save and optionally push the resulting model artifacts
+
+### 3. Merge adapters
+
+Use `fine-tuning/merge_weights.py` to merge adapter weights back into the base model so the result can be exported for local or cluster inference.
+
+### 4. Run inference on HPC
+
+Use the shell and SLURM scripts in `hpc/classification/` or `hpc/classification_usa/` to:
+
+- find tweet archives to process
+- submit jobs in bulk
+- run GGUF models with `llama_cpp`
+- save predictions and checkpoints
+
+### 5. Validate and analyse outputs
+
+Use:
+
+- `hpc/validation/validation_all.py` for automated evaluation runs on held-out datasets
+- `validation/` for standalone R summaries
+- `model_performance/modelling_llm_performances.Rmd` for the main comparative analysis across models and languages
+
+## Important implementation notes
+
+- The repository contains research scripts, not a packaged application.
+- Many scripts use hard-coded absolute paths for local machines, Harvard FASRC paths, and Hugging Face dataset/model names.
+- Several scripts assume access to GPUs, SLURM, `llama_cpp`, and locally stored GGUF or adapter files.
+- The most complete performance-comparison workflow is currently under `model_performance/`.
+
+## Recommended starting points
+
+If you are trying to understand the repository quickly, start with:
+
+1. `model_performance/modelling_llm_performances.Rmd`
+2. `model_performance/helpers.R`
+3. `fine-tuning/generate_training_test_dataset.py`
+4. `fine-tuning/finetune-L32-3B-en-es.py`
+5. `hpc/classification/classify_tweets_gguf.py`
+
+These files cover the main analysis, helper logic, dataset generation, model training, and production-style inference workflow.

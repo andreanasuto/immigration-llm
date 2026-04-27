@@ -5,20 +5,39 @@ date: "2025-04-08"
 output: html_document
 ---
 
-Build a model to assess the performance of a series of LLMs across multiple languages, translations, test/train dataset
+This document assembles a message-by-model evaluation dataset and uses it to compare classification performance across model families, source languages, translation status, and train/test splits. The workflow has two stages:
 
-The dataset to perform this should have this structure. All variables should be factor/characters:
+1. It reads raw and translated classification outputs, standardises their metadata, and combines them into a single modelling table.
+2. It estimates a series of logistic models and descriptive summaries to show where accuracy changes across models, languages, and label compositions.
 
-ID | Model | Language | Translation | Test/Train | Correct
-100100 | FT-Multi | IT | 0 | Train | 1
-100100 | FT-EN | IT | 1 | Test | 0
-100100 | FT-EN-ES | IT | 1 | Train | 1
-120300 | LLM2 | EN | EN | Train | 1
+The modelling dataset is organised at the `message_id × model output` level, so a single underlying tweet can appear more than once when it has been classified by multiple models or under both translated and non-translated conditions. After ingestion, the notebook derives a text-based shared identifier (`newId`) to link repeated observations of the same plaintext message across files.
+
+The main variables used in the analysis are:
+
+- `message_id`: original identifier provided in the source file
+- `newId`: harmonised identifier created from the plaintext tweet so the same message can be tracked across models
+- `plaintext`: original tweet text used for matching and modelling
+- `Model`: model family that produced the classification, standardised to labels such as `English`, `Spanish`, `English-Spanish`, and `Multilanguage`
+- `Language`: language of the tweet content
+- `Train_Test`: whether the observation comes from the training or test evaluation split
+- `Translation`: binary flag indicating whether the model classified a translated version of the tweet
+- `TranslationQuality`: status of the translated text, coded as `Not Translated`, `Unknown`, `Good`, or `Bad`
+- `label`: human-coded gold label
+- `label_llama`: model-predicted label
+- `Correct`: binary outcome equal to `1` when `label_llama == label` and `0` otherwise
+
+An illustrative schema is shown below:
+
+message_id | newId | Model | Language | Train_Test | Translation | TranslationQuality | label | label_llama | Correct
+100100 | 1 | English | Italian | Train | 0 | Not Translated | neutral | neutral | 1
+100100 | 1 | English-Spanish | Italian | Train | 1 | Good | neutral | anti-immigration | 0
+100100 | 1 | Multilanguage | Italian | Test | 0 | Not Translated | neutral | neutral | 1
+120300 | 2 | Spanish | English | Test | 1 | Unknown | unrelated | unrelated | 1
 ...
 
 
 ```{r}
-# Set the option to avoid scientific notation
+# set options
 options(scipen = 999)
 ```
 
@@ -26,14 +45,12 @@ options(scipen = 999)
 # load libraries
 library(dplyr)
 library(ggplot2)
-library(tidyr)
 library(purrr)
 library(readr)
 library(stringr)
 library(broom)
 library(caret)
 library(readxl)
-library(pROC)
 library(rpart)
 library(rpart.plot)
 library(viridis)
@@ -41,350 +58,69 @@ library(showtext)
 library(sysfonts)
 library(forcats)
 library(scales)
-library(extrafont)
-library(RColorBrewer)
-library(stringr)
+library(lme4)
 
-# Add Google Fonts (easier than importing system fonts)
-font_add_google("Roboto Condensed", "roboto_condensed")
-showtext_auto()
+# load fonts and helper functions
+base_family <- "sans"
+
+try({
+  font_add_google("Roboto Condensed", "roboto_condensed")
+  showtext_auto()
+  base_family <- "roboto_condensed"
+}, silent = TRUE)
+
+source("/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/helpers.R")
 ```
 
 ```{r}
-# set working directory
-knitr::opts_knit$set(root.dir = "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm")
+# define project paths once so the rest of the notebook can reuse them
+project_root <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm"
+knitr::opts_knit$set(root.dir = project_root)
 
-# dataset paths
-base_path_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/test_dataset_raw"
-
-base_path_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/train_dataset_raw"
-
-path_translation_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/test_dataset_translation"
-
-path_translation_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/immigration-llm/model_performance/data/train_dataset_translation"
-
-#path_translation_checked_test <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/test/"
-
-#path_translation_checked_train <- "/Users/Andrea/Library/CloudStorage/OneDrive-TheUniversityofLiverpool/PhD/code/global-immigration-sentiment/validation/tweet_translation_checked/train/"
-
-# output path
-output_dir <- "output"
+base_path_test <- file.path(project_root, "model_performance", "data", "test_dataset_raw")
+base_path_train <- file.path(project_root, "model_performance", "data", "train_dataset_raw")
+path_translation_test <- file.path(project_root, "model_performance", "data", "test_dataset_translation")
+path_translation_train <- file.path(project_root, "model_performance", "data", "train_dataset_translation")
+output_dir <- file.path(project_root, "model_performance", "output")
 ```
 
+## Data Preparation
+
 ```{r}
-# Get all CSV files
-test_files <- list.files(base_path_test, pattern = "\\.csv$", full.names = TRUE)
-train_files <- list.files(base_path_train, pattern = "\\.csv$", full.names = TRUE)
-
-# Get all CSV files
-test_translation_files <- list.files(path_translation_test, pattern = "\\.(csv|xlsx)$", full.names = TRUE)
-train_translation_files <- list.files(path_translation_train, pattern = "\\.(csv|xlsx)$", full.names = TRUE)
-
-# Define dataset directories
-dirs <- list(
-  list(path = base_path_train, type = "Train"),
-  list(path = base_path_test, type = "Test"),
-  list(path = path_translation_train, type = "Train"),
-  list(path = path_translation_test, type = "Test")
-)
+# ingest raw and translated evaluation outputs into one long table
+df <- build_combined_dataset(
+  raw_test_dir = base_path_test,
+  raw_train_dir = base_path_train,
+  translation_test_dir = path_translation_test,
+  translation_train_dir = path_translation_train
+) %>%
+  prepare_modelling_dataset() %>%
+  add_share_unrelated() %>%
+  add_language_share()
 ```
 
-```{r}
-# Function to determine language
-get_language <- function(file_path, df) {
-  if (str_detect(file_path, "mig-multi")) {
-    return(df$lang[1])
-  } else {
-    filename <- basename(file_path)
-    lang_from_name <- str_match(filename, "_([a-z]{2})\\.csv$|_([a-z]{2})_")[,2]
-    if (!is.na(lang_from_name)) {
-      return(lang_from_name)
-    } else {
-      return(df$tweet_lang[1])
-    }
-  }
-}
-```
+## Descriptive Statistics
 
 ```{r}
-extract_model_dataset <- function(filename) {
-  # Remove .csv and extract base name
-  base <- basename(gsub("\\.csv$", "", filename))
-  parts <- unlist(strsplit(base, "_"))
-
-  # Try to extract model name: look for stop tokens like _K, _mig-*, _test
-  stop_keywords <- grep("^K$|^mig-|^test$", parts)
-
-  if (length(stop_keywords) > 0) {
-    model <- paste(parts[1:(min(stop_keywords) - 1)], collapse = "_")
-  } else {
-    model <- base  # fallback: use whole filename if pattern unclear
-  }
-
-  # Convert list to named vector
-  model_map <- c(
-    "llama32-3B-mig-en-es-Q4" = "English-Spanish",
-    "llama32-3B-mig-en-Q4"    = "English",
-    "llama32-3B-mig-es-Q4"    = "Spanish",
-    "llama32-3B-mig-multi-Q4" = "Multilanguage"
-  )
-
-  # Lookup in named vector
-  if (model %in% names(model_map)) {
-    return(model_map[model])
-  } else {
-    return(model)
-  }
-}
-
-```
-
-```{r}
-lang_code_to_name <- function(code) {
-  language_map <- list(
-    "ar" = "Arabic",
-    "es" = "Spanish",
-    "pt" = "Portuguese",
-    "fr" = "French",
-    "it" = "Italian",
-    "de" = "German",
-    "hi" = "Hindi",
-    "hu" = "Hungarian",
-    "in" = "Indonesian",
-    "tr" = "Turkish",
-    "pl" = "Polish",
-    "ko" = "Korean",
-    "en" = "English"
-  )
-  return(ifelse(code %in% names(language_map), language_map[[code]], code))
-}
-```
-
-```{r}
-process_dataset <- function(file_path, split_type) {
-  
-  # Skip files that contain 'full' in the name
-  if (str_detect(tolower(file_path), "full")) {
-    #message(paste("Skipping file with 'full' in name:", file_path))
-    return(NULL)
-  }
-  
-  if (!grepl("Q4", basename(file_path))) {
-    return(NULL)
-  }
-  
-  # Read the file based on its extension (CSV or Excel)
-  file_extension <- tools::file_ext(file_path)
-  if (file_extension == "csv") {
-    df <- read_csv(file_path, col_types = cols(.default = "c"))
-  } else if (file_extension %in% c("xlsx", "xls")) {
-    df <- read_excel(file_path)
-  } else {
-    return(NULL)  # Skip unsupported file types
-  }
-  
-  # Rename "text" to "plaintext" only if "plaintext" doesn't already exist
-  if ("text" %in% names(df) && !"plaintext" %in% names(df)) {
-    df <- df %>% rename(plaintext = text)
-  }
-  
-# Function to detect if a file is from mig-multi or one of the translation folders
-is_mig_multi_or_translation <- function(file_path) {
-  path <- tolower(normalizePath(file_path))
-  translation_test <- tolower(normalizePath(path_translation_test))
-  translation_train <- tolower(normalizePath(path_translation_train))
-
-  str_detect(path, "mig-multi") |
-    str_starts(path, translation_test) |
-    str_starts(path, translation_train)
-}
-  
-  # Determine if it's a relevant dataset
-  mig_or_trans_flag <- is_mig_multi_or_translation(file_path)
-  
-  # Assign language column row-wise
-  df <- df %>%
-    mutate(lang_code = if (mig_or_trans_flag) lang else tweet_lang)
-
-  df$Language <- map_chr(df$lang_code, lang_code_to_name)
-  
-  # assign message_id
-  df <- df %>%
-    mutate(
-      message_id = case_when(
-        is.numeric(message_id) ~ formatC(message_id, format = "f", drop0trailing = TRUE),
-        TRUE ~ as.character(message_id)
-      )
-    )
-
-  # Assign Model
-  model <- extract_model_dataset(file_path)
-
-  if ("translation_check" %in% colnames(df)) {
-    df$TranslationQuality <- ifelse(df$translation_check == 1, "Good", "Bad")
-    df$Translation <- 1
-  } else if (startsWith(file_path, path_translation_train) || startsWith(file_path, path_translation_test)) {
-    df$Translation <- 1
-    df$TranslationQuality <- "Unknown"
-  } else {
-    df$Translation <- 0
-    df$TranslationQuality <- "Not Translated"
-  }
-
-  # Final dataframe
-  df_processed <- df %>%
-    mutate(
-      Model = model,
-      Train_Test = split_type,
-      Correct = ifelse(label_llama == label, 1, 0),
-      file_path = file_path
-    ) %>%
-    select(
-      message_id, Model, Language, Translation, TranslationQuality,
-      Train_Test, Correct, label, label_llama, plaintext, file_path
-    )
-  
-  # Rename Model values here
-  df_processed <- df_processed %>%
-    mutate(Model = case_when(
-      Model == "llama-32-3B-en-es-Q4" ~ "English-Spanish",
-      Model == "llama-32-3B-en-Q4"    ~ "English",
-      Model == "llama-32-3B-es-Q4"    ~ "Spanish",
-      Model == "llama-32-3B-multi-Q4" ~ "Multilanguage",
-      TRUE ~ Model
-    ))
-  
-  # make consistent Neutral
-  df_processed <- df_processed %>%
-    mutate(label = case_when(
-      label == "Neutral" ~ "neutral",
-      TRUE ~ label
-    ))
-
-
-  return(df_processed)
-}
-```
-
-```{r}
-# assign new IDs to each unique plaintext
-assign_new_ids <- function(df) {
-  df %>%
-    group_by(plaintext) %>%
-    mutate(newId = cur_group_id()) %>%
-    ungroup()
-}
-```
-
-### Create dataset
-```{r}
-# Collect all .csv files from test and train folders
-test_files <- list.files(base_path_test, pattern = "\\.csv$", full.names = TRUE)
-train_files <- list.files(base_path_train, pattern = "\\.csv$", full.names = TRUE)
-translation_test_files <- list.files(path_translation_test, pattern = "\\.xlsx$", full.names = TRUE)
-translation_train_files <- list.files(path_translation_train, pattern = "\\.xlsx$", full.names = TRUE)
-
-# Process each file and combine
-processed_test <- map_dfr(test_files, ~process_dataset(.x, "Test"))
-processed_train <- map_dfr(train_files, ~process_dataset(.x, "Train"))
-processed_translation_test <- map_dfr(translation_test_files, ~process_dataset(.x, "Test"))
-processed_translation_train <- map_dfr(translation_train_files, ~process_dataset(.x, "Train"))
-
-# Merge all data
-df <- bind_rows(
-  processed_train,
-  processed_test,
-  processed_translation_train,
-  processed_translation_test
-)
-```
-
-#### Post-processing dataset
-```{r}
-# assign new ID
-df <- assign_new_ids(df)
-```
-
-```{r}
-# count number of obs per language
-df %>%
-  count(Language, name = "n_observations") %>%
-  arrange(desc(n_observations))
-
-table(df$Language)
-```
-
-```{r}
-table(df$Language, df$Model)
-```
-
-
-```{r}
-# Remove rows with NA in Language or plaintext
-df <- df %>%
-  filter(!is.na(Language)) %>%
-  filter(!is.na(plaintext))
-```
-
-```{r}
-df <- df %>%
-  distinct(Model, newId, Translation, .keep_all = TRUE) # make sure that each Model has only one observation per newId and Translation
-```
-
-```{r}
-# Ensure all variables are factors
-df <- df %>%
-  mutate(
-    message_id = as.factor(message_id),
-    Model = as.factor(Model),
-    Language = as.factor(Language),
-    Train_Test = as.factor(Train_Test),
-    Translation = as.factor(Translation),
-    TranslationQuality = as.factor(TranslationQuality),
-    Correct = as.factor(Correct)
-  )
-```
-
-```{r}
-# show distribution of obs by Language and Model
-table(df$Language, df$Model)
-```
-
-### Checks
-```{r}
-# check if there are NAs in df
+# inspect missingness and outcome balance
 na_count <- sapply(df, function(x) sum(is.na(x)))
 print(na_count)
-
-# check how many correct values are in Correct
 table(df$Correct)
 ```
 
 ```{r}
-# remove obs with NA in label_llama
-df <- df %>%
-  filter(!is.na(label_llama))
-```
-
-```{r}
-df <- df %>%
-  group_by(Language, Train_Test) %>%
-  mutate(Share_Unrelated = mean(label == "unrelated")) %>%
-  ungroup()
-```
-
-
-```{r}
-# count number of obs per language
+# summarise observations by language and model
 df %>%
   count(Language, name = "n_observations") %>%
   arrange(desc(n_observations))
+
+table(df$Language, df$Model)
 ```
 
 ```{r}
-# count number of unique observations per language
+# summarise unique tweets by language
 df_unique_counts <- df %>%
-  distinct(newId, Language) %>%  # ensure uniqueness of newID per language
+  distinct(newId, Language) %>%
   count(Language, name = "n_unique_observations") %>%
   arrange(desc(n_unique_observations))
 
@@ -392,97 +128,53 @@ df_unique_counts
 ```
 
 ```{r}
-# count the number of obs with Translation == 'Good'
+# summarise checked translations
 translation_count <- df %>%
-  filter(TranslationQuality == 'Good') %>%
+  filter(TranslationQuality == "Good") %>%
   group_by(Model, Language) %>%
-  summarise(count = n())
+  summarise(count = n(), .groups = "drop")
+
 translation_count
 ```
 
-### Add language pre-trainign share from Touvron et al. (2023)
 ```{r}
-# Create the language share lookup table
-lang_share_lookup <- data.frame(
-  code = c("en", "unknown", "de", "fr", "sv", "zh", "es", "ru", "nl", "it", "ja", "pl", "pt", "vi",
-           "uk", "ko", "ca", "sr", "id", "cs", "fi", "hu", "no", "ro", "bg", "da", "sl", "hr"),
-  Language = c("English", "Unknown", "German", "French", "Swedish", "Chinese", "Spanish", "Russian", "Dutch", "Italian", 
-               "Japanese", "Polish", "Portuguese", "Vietnamese", "Ukrainian", "Korean", "Catalan", "Serbian", "Indonesian",
-               "Czech", "Finnish", "Hungarian", "Norwegian", "Romanian", "Bulgarian", "Danish", "Slovene", "Croatian"),
-  LangShare = c(89.70, 8.38, 0.17, 0.16, 0.15, 0.13, 0.13, 0.13, 0.12, 0.11, 0.10, 0.09, 0.09, 0.08,
-                0.07, 0.06, 0.04, 0.04, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01)
+# create and save the label distribution table
+label_distribution <- df %>%
+  group_by(newId) %>%
+  summarise(label = first(label), .groups = "drop") %>%
+  count(label, name = "n_tweets") %>%
+  mutate(share_total_tweets = n_tweets / sum(n_tweets)) %>%
+  arrange(desc(n_tweets))
+
+write_csv(label_distribution, file.path(output_dir, "label_distribution.csv"))
+label_distribution
+```
+
+## Models
+
+### Model 1
+```{r}
+# use consistent baselines so coefficients are interpretable across models
+df <- set_reference_levels(df)
+
+# fit the logistic regression model
+baseline_glm <- glm(
+  Correct ~ Model + Language + Train_Test + TranslationQuality + label,
+  data = df,
+  family = binomial()
 )
 
-# Merge the LangShare into your existing df by the language code
-df <- merge(df, lang_share_lookup, by = "Language", all.x = TRUE)
-df$LangShare[is.na(df$LangShare)] <- 0
-```
-
-## Model
-```{r}
-# Set reference levels for the factors
-df$Model <- relevel(df$Model, ref = "English") #llama-32-3B-en-Q4 - all the models are 4bit
-df$Language <- relevel(df$Language, ref = "English")
-df$Train_Test <- relevel(df$Train_Test, ref = "Train")
-df$label <- factor(df$label)
-df$label <- relevel(df$label, ref = "neutral")
-df$TranslationQuality <- factor(df$TranslationQuality)
-df$TranslationQuality <- relevel(df$TranslationQuality, ref = "Not Translated") # Not Translated
-df$Translation <- factor(df$Translation)
-
-# Fit the logistic regression model
-logit_model <- glm(Correct ~ Model + Language + Train_Test + TranslationQuality + label, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
-                   data = df, 
-                   family = binomial())
-
-# Summarize the model
-summary(logit_model)
+# summarise the model
+summary(baseline_glm)
 ```
 
 ```{r}
-# Load the font (only needs to be run once per session)
-font_add_google("Roboto Condensed", "roboto")
-showtext_auto()
+# prepare coefficient output for the baseline coefficient plot
+baseline_results <- tidy_baseline_terms(baseline_glm)
 ```
 
 ```{r}
-baseline_results <- tidy(logit_model, conf.int = TRUE) %>%
-  filter(term != "(Intercept)") %>%
-  mutate(
-    variable_group = case_when(
-      str_starts(term, "Model")              ~ "Model",
-      str_starts(term, "Language")           ~ "Language",
-      str_starts(term, "TranslationQuality") ~ "Translation",
-      str_starts(term, "label")              ~ "Label",
-      TRUE                                   ~ "Other"
-    ),
-    clean_term = case_when(
-      variable_group == "Model"        ~ str_remove(term, "^Model"),
-      variable_group == "Language"     ~ str_remove(term, "^Language"),
-      variable_group == "Translation"  ~ str_remove(term, "^TranslationQuality"),
-      variable_group == "Label"        ~ case_when(
-        str_detect(term, "unrelated") ~ "Unrelated",
-        str_detect(term, "anti")      ~ "Anti-Immigration",
-        str_detect(term, "pro")       ~ "Pro-Immigration",
-        TRUE                          ~ str_remove(term, "^label")
-      ),
-      TRUE                             ~ term
-    ),
-    significance = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01  ~ "**", 
-      p.value < 0.05  ~ "*",
-      TRUE            ~ ""
-    ),
-    abs_estimate = abs(estimate)
-  ) %>%
-  # Remove Train_Test effects
-  filter(!str_detect(term, "^Train_Test")) %>%
-  arrange(variable_group, desc(abs_estimate))
-```
-
-```{r}
-# set color blind palette
+# set the colour palette
 cb_palette <- c(
   "#E69F00", "#56B4E9", "#009E73", "#F0E442",
   "#0072B2", "#D55E00", "#CC79A7", "#999999"
@@ -490,15 +182,7 @@ cb_palette <- c(
 ```
 
 ```{r}
-# Add Roboto Condensed
-font_add_google("Roboto Condensed", "roboto_condensed")
-
-# Turn on showtext
-showtext_auto()
-```
-
-```{r}
-# Define named palette based on cb_palette positions
+# define the named palette
 cb_palette_named <- c(
   "Model"       = cb_palette[1],
   "Language"    = cb_palette[5],
@@ -519,78 +203,45 @@ baseline_plot <- baseline_results %>%
   facet_grid(rows = vars(variable_group), scales = "free_y", space = "free_y", switch = "y") +
   scale_color_manual(values = cb_palette_named, guide = "none") +
   labs(
-    #title = "Baseline Model",
     x = "Coefficient Estimates", y = NULL
   ) +
   theme(
-    text              = element_text(family = "roboto_condensed"),
+    text              = element_text(family = base_family),
     strip.text.y.left = element_text(size = 11, face = "bold"),
     axis.text.y       = element_text(size = 12, lineheight = 0.8),
     axis.text.x       = element_text(size = 10),
     axis.title.x    = element_text(size = 14, margin = margin(t = 12)),
     panel.grid.minor  = element_blank(),
     strip.placement   = "outside",
-    plot.margin       = margin(10, 30, 10, 10)  # give more room on the right
-    #theme(
-    #plot.title = element_text(size = 16, face = "bold"),
-    #plot.subtitle = element_text(size = 12, color = "grey40"),
-    #strip.text = element_text(size = 11, face = "bold"),
-    #axis.text.y = element_text(size = 13),
-    #axis.text.x = element_text(size = 10),
-    #axis.title.x    = element_text(size = 13),
-    #panel.grid.minor = element_blank()
-    
+    plot.margin       = margin(10, 30, 10, 10)
   )
 
 baseline_plot
 
 # save the plot
-ggsave(filename = "model1_baseline_plot.png", plot = baseline_plot, path = "output", width = 10, height = 6, dpi = 300)
+ggsave(filename = "model1_baseline_plot.png", plot = baseline_plot, path = output_dir, width = 10, height = 6, dpi = 300)
 ```
 
 
-#### Model 2
+### Model 2
 ```{r}
-# Model 2 - Interactions Model*Language
-# Fit the logistic regression model
-logit_modelxlanguage <- glm(Correct ~ Model*Language + label + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
-                   data = df, 
-                   family = binomial())
+# estimate whether model performance changes by language
+model_language_glm <- glm(
+  Correct ~ Model * Language + label + Train_Test + TranslationQuality,
+  data = df,
+  family = binomial()
+)
 
-# Summarize the model
-summary(logit_modelxlanguage)
+# summarise the model
+summary(model_language_glm)
 ```
 
 ```{r}
-# Tidy and filter model 2 results
-model2_results <- tidy(logit_modelxlanguage, conf.int = TRUE) %>%
-  filter(term != "(Intercept)") %>%
-  filter(
-    grepl("^Model", term) |
-    grepl("^Language", term)
-  ) %>%
-  mutate(
-    variable_group = case_when(
-      grepl("^Model:Language", term) ~ "Model × Language",
-      grepl("^Model", term) ~ "Model Type",
-      grepl("^Language", term) ~ "Language",
-      TRUE ~ "Other"
-    ),
-    clean_term = case_when(
-      grepl("^Model:Language", term) ~ {
-        m <- gsub("^Model", "", term)
-        m <- gsub(":Language", " × ", m)
-        m
-      },
-      grepl("^Model", term) ~ gsub("^Model", "", term),
-      grepl("^Language", term) ~ gsub("^Language", "", term),
-      TRUE ~ tools::toTitleCase(term)
-    ),
-    abs_estimate = abs(estimate)
-  )
+# isolate the model and language terms for the interaction plot
+model2_results <- tidy_model_language_terms(model_language_glm)
 
-# Plot 2 for Model 2
-model2_plot2 <- model2_results %>%
+# plot model 2 coefficients
+model_language_coeff_plot <- model2_results %>%
   mutate(
     clean_term = fct_reorder(clean_term, estimate),
     variable_group = fct_reorder(variable_group, abs_estimate, .fun = median)
@@ -602,11 +253,10 @@ model2_plot2 <- model2_results %>%
   facet_wrap(~variable_group, scales = "free_y", ncol = 1, strip.position = "left") +
   scale_color_manual(values = cb_palette, guide = "none") +
   labs(
-    #title = "Model × Language Interaction Coefficients",
     x = "Log-odds (Coefficient Estimate)", y = NULL
   ) +
   theme(
-    text = element_text(family = "roboto_condensed"),
+    text = element_text(family = base_family),
     plot.title = element_text(size = 16, face = "bold"),
     plot.subtitle = element_text(size = 12, color = "grey40"),
     strip.text = element_text(size = 9, face = "bold"),
@@ -616,46 +266,13 @@ model2_plot2 <- model2_results %>%
   )
 
 # show the plot
-model2_plot2
-
-# Save plot (uncomment to activate)
-#ggsave(filename = "model2_plot2.png", plot = model2_plot2, path = "output", width = 10, height = 6, dpi = 300)
+model_language_coeff_plot
 ```
 
 
 ```{r}
-# Tidy model
-model2_tidy <- tidy(logit_modelxlanguage, conf.int = TRUE) %>%
-  filter(term != "(Intercept)")
-
-# Get model and language levels
-model_levels <- levels(df$Model)
-language_levels <- levels(df$Language)
-
-# Create all combinations
-combinations <- expand.grid(Model = model_levels, Language = language_levels, stringsAsFactors = FALSE)
-
-# Function to get coefficient value or 0 if not present
-get_coef <- function(term_name, coef_df) {
-  val <- coef_df$estimate[coef_df$term == term_name]
-  if (length(val) == 0) return(0)
-  return(val)
-}
-
-# Sum main effects + interaction effects
-combinations$log_odds <- mapply(function(model, lang) {
-  main_model <- paste0("Model", model)
-  main_lang  <- paste0("Language", lang)
-  interaction <- paste0("Model", model, ":Language", lang)
-
-  get_coef(main_model, model2_tidy) +
-    get_coef(main_lang, model2_tidy) +
-    get_coef(interaction, model2_tidy)
-}, combinations$Model, combinations$Language)
-
-# Add predicted accuracy
-combinations$accuracy <- plogis(combinations$log_odds)  # inverse logit
-
+# convert model coefficients into a full model-language prediction surface
+combinations <- compute_model_language_surface(model_language_glm, df)
 ```
 
 ```{r}
@@ -664,11 +281,11 @@ combinations$Model <- factor(
   levels = c("English", "Spanish", "English-Spanish", "Multilanguage")
 )
 
-# 2. Compute mean accuracy by language and reorder Language (y-axis)
+# order languages by average predicted accuracy
 accuracy_grouped_combination <- combinations %>%
   group_by(Language) %>%
   summarise(mean_accuracy = mean(accuracy, na.rm = TRUE)) %>%
-  arrange(mean_accuracy)  # most accurate at top
+  arrange(mean_accuracy)
 
 combinations$Language <- factor(
   combinations$Language,
@@ -677,7 +294,7 @@ combinations$Language <- factor(
 ```
 
 ```{r}
-# Heatmap of log-odds
+# plot heatmaps for model 2
 heatmap_logodds <- ggplot(combinations, aes(x = Model, y = Language, fill = log_odds)) +
   geom_tile(color = "white") +
   scale_fill_viridis_c(
@@ -685,66 +302,76 @@ heatmap_logodds <- ggplot(combinations, aes(x = Model, y = Language, fill = log_
     direction = 1,
     name = "Log-odds"
   ) +
-  #labs(title = "Log-odds by Model × Language") +
   theme_minimal() +
   theme(
-    text = element_text(family = "roboto_condensed"),
-    plot.title = element_text(family = "roboto_condensed", face = "bold"),
-    axis.text = element_text(family = "roboto_condensed"),
-    legend.title = element_text(family = "roboto_condensed"),
-    legend.text = element_text(family = "roboto_condensed"),
+    text = element_text(family = base_family),
+    plot.title = element_text(family = base_family, face = "bold"),
+    axis.text = element_text(family = base_family),
+    legend.title = element_text(family = base_family),
+    legend.text = element_text(family = base_family),
     axis.text.y = element_text(size = 11),
     axis.text.x = element_text(size = 11),
     axis.title.x    = element_text(size = 13, margin = margin(t = 12)),
     axis.title.y    = element_text(size = 13)
     )
 
-# Heatmap of predicted accuracy
 heatmap_accuracy <- ggplot(combinations, aes(x = Model, y = Language, fill = accuracy)) +
   geom_tile(color = "white") +
   scale_fill_gradient(low = "white", high = "darkgreen", name = "Predicted Accuracy") +
-  #labs(title = "Predicted Accuracy by Model × Language") +
   theme_minimal() +
   theme(
-    text = element_text(family = "roboto_condensed"),
-    plot.title = element_text(family = "roboto_condensed", face = "bold"),
-    axis.text = element_text(family = "roboto_condensed"),
-    legend.title = element_text(family = "roboto_condensed"),
-    legend.text = element_text(family = "roboto_condensed")
-    #panel.grid.minor = element_blank()
+    text = element_text(family = base_family),
+    plot.title = element_text(family = base_family, face = "bold"),
+    axis.text = element_text(family = base_family),
+    legend.title = element_text(family = base_family),
+    legend.text = element_text(family = base_family)
   )
 
-# Save the heatmaps
- ggsave(filename = "model_language_interaction_heatmap_logodds.png", plot = heatmap_logodds, path = "output", width = 8, height = 6, dpi = 300)
- #ggsave(filename = "model_language_interaction_heatmap_accuracy.png", plot = heatmap_accuracy, path = "output", width = 8, height = 6, dpi = 300)
+# save the heatmaps
+ggsave(filename = "model_language_interaction_heatmap_logodds.png", plot = heatmap_logodds, path = output_dir, width = 8, height = 6, dpi = 300)
+ggsave(filename = "model_language_interaction_heatmap_accuracy.png", plot = heatmap_accuracy, path = output_dir, width = 8, height = 6, dpi = 300)
 
-# Print plots
+# print the plots
 print(heatmap_logodds)
-#print(heatmap_accuracy)
+print(heatmap_accuracy)
 ```
 
-#### Model 3
+### Model 3
 ```{r}
-# Model 3 - Interactions Model*Language + Model*Share_Unrelated
-# Fit the logistic regression model
-logit_modelxShareUnrelated <- glm(Correct ~ Model*Language + Model*Share_Unrelated + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)
-                   data = df, 
-                   family = binomial())
-
-# Summarize the model
-summary(logit_modelxShareUnrelated)
-```
-
-```{r}
-# Color-blind–safe colours (Okabe–Ito + grey)
-model_cols <- c(
-  "English"         = "#9A9A9A",  # neutral mid-grey
-  "Spanish"         = "#E69F00",  # orange from Okabe–Ito
-  "English-Spanish" = "#FE6100",  # reddish-purple
-  "Multilanguage"   = "#0072B2"   # deep blue
+# estimate whether model performance changes as the share of unrelated tweets rises
+share_unrelated_glm <- glm(
+  Correct ~ Model * Language + Model * Share_Unrelated + Train_Test + TranslationQuality,
+  data = df,
+  family = binomial()
 )
 
-p <- ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
+# summarise the model
+summary(share_unrelated_glm)
+```
+
+```{r}
+# create a prediction grid to visualise how accuracy changes with label composition
+df_plot_model3 <- expand.grid(
+  Share_Unrelated = seq(min(df$Share_Unrelated, na.rm = TRUE), max(df$Share_Unrelated, na.rm = TRUE), length.out = 100),
+  Model = levels(df$Model),
+  Language = levels(df$Language),
+  Train_Test = "Train",
+  TranslationQuality = "Not Translated"
+)
+
+df_plot_model3$Accuracy <- predict(share_unrelated_glm, newdata = df_plot_model3, type = "response")
+```
+
+```{r}
+# set colours for the model 3 line chart
+model_cols <- c(
+  "English" = "#9A9A9A",
+  "Spanish" = "#E69F00",
+  "English-Spanish" = "#FE6100",
+  "Multilanguage" = "#0072B2"
+)
+
+share_unrelated_prediction_plot <- ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model)) +
   geom_line(size = 1.2) +
   facet_wrap(~ Language, ncol = 4) +
   scale_color_manual(values = model_cols) +
@@ -756,7 +383,7 @@ p <- ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model
   scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
   theme_minimal(base_size = 16) +
   theme(
-    text             = element_text(family = "roboto_condensed"),
+    text             = element_text(family = base_family),
     axis.title       = element_text(size = 18),
     axis.text        = element_text(size = 14),
     strip.text       = element_text(size = 16),
@@ -766,42 +393,20 @@ p <- ggplot(df_plot_model3, aes(x = Share_Unrelated, y = Accuracy, color = Model
     panel.grid.minor = element_blank()
   )
 
-#save plot
-ggsave(filename = "model_shareunrelated_language_interaction.png", plot = p, path = "output", width = 12, height = 8, dpi = 300)
-#print(p)
+# save the plot
+ggsave(filename = "model_shareunrelated_language_interaction.png", plot = share_unrelated_prediction_plot, path = output_dir, width = 12, height = 8, dpi = 300)
+share_unrelated_prediction_plot
 ```
-The chart if using the interaction between Language and Model (Model*Language), the results change based on the fact that for certain languages the Multilanguage model is better than others when the share of unrelated tweets is quite high (eg. 80%).
+The interaction specification suggests that the effect of `Share_Unrelated` is not uniform across all languages. In some language panels, the `Multilanguage` model becomes comparatively stronger only when the share of unrelated tweets is very high.
 
-On the other hand, if the chart is using JUST the interaction between Model and Share_Unrelated (Model*Share_Unrelated), the results are more consistent across languages, showing that the Multilanguage model is generally worse than the English-Spanish model and Spanish model after 50% of tweets are not related to immigration. This means that the behavior is more standard.
+By contrast, the direct `Model × Share_Unrelated` interaction is more stable across languages and indicates that the `Multilanguage` model tends to underperform the `English-Spanish` and `Spanish` models once unrelated tweets make up a large share of the sample.
 
 ```{r}
-# Tidy and filter model 3 results
-model3_results <- tidy(logit_modelxShareUnrelated, conf.int = TRUE) %>%
-  filter(term != "(Intercept)") %>%
-  filter(
-    grepl("^Model", term) |
-    grepl("Share_Unrelated", term)
-  ) %>%
-  mutate(
-    variable_group = case_when(
-      grepl("^Model:", term) ~ "Model × Share Unrelated",
-      grepl("^Model", term) ~ "Model Type",
-      grepl("Share_Unrelated", term) ~ "Share Unrelated",
-      TRUE ~ "Other"
-    ),
-    clean_term = case_when(
-      grepl("^Model:.*Share_Unrelated", term) ~ gsub("Model", "", term) %>%
-        gsub(":Share_Unrelated", " × Share Unrelated", .) %>%
-        gsub("_", " ", .),  # Replace underscores with spaces
-      grepl("^Model", term) ~ gsub("^Model", "", term) %>%
-        gsub("_", " ", .),  # Replace underscores with spaces
-      TRUE ~ tools::toTitleCase(gsub("_", " ", term))  # Replace underscores with spaces
-    ),
-    abs_estimate = abs(estimate)
-  )
+# isolate the coefficients tied to model type and unrelated-share interactions
+model3_results <- tidy_share_unrelated_terms(share_unrelated_glm)
 
-# Plot 2 for Model 3
-model3_plot2 <- model3_results %>%
+# plot model 3 coefficients
+share_unrelated_coeff_plot <- model3_results %>%
   mutate(
     clean_term = fct_reorder(clean_term, estimate),
     variable_group = fct_reorder(variable_group, abs_estimate, .fun = median)
@@ -813,11 +418,10 @@ model3_plot2 <- model3_results %>%
   facet_wrap(~variable_group, scales = "free_y", ncol = 1, strip.position = "left") +
   scale_color_manual(values = cb_palette, guide = "none") +
   labs(
-    #title = "Model × Share_Unrelated Interaction Coefficients",
     x = "Estimates", y = NULL
   ) +
   theme(
-    text = element_text(family = "roboto_condensed"),
+    text = element_text(family = base_family),
     plot.title = element_text(size = 16, face = "bold"),
     plot.subtitle = element_text(size = 12, color = "grey40"),
     strip.text = element_text(size = 9, face = "bold"),
@@ -826,63 +430,44 @@ model3_plot2 <- model3_results %>%
     panel.grid.minor = element_blank()
   )
 
-model3_plot2
+share_unrelated_coeff_plot
 
-# Save plot
-ggsave(filename = "model_interaction_language_share_unrelated_plot.png", plot = model3_plot2, path = "output", width = 10, height = 6, dpi = 300)
+# save the plot
+ggsave(filename = "model_interaction_language_share_unrelated_plot.png", plot = share_unrelated_coeff_plot, path = output_dir, width = 10, height = 6, dpi = 300)
 ```
 
 
-#### Model 4
+### Model 4
 
 
-Idea - to test if the Multilanguage adds noise, we keep the language constant (English) and see how it performs. This means that we need to use only tweets that were classified based on the translation.
+This specification tests whether the `Multilanguage` model still underperforms once the evaluation language is partially standardised through translation. Restricting the sample to translated tweets reduces variation coming from the original source language and makes the comparison closer to a common-language setting.
 
-The results below seems to show that even when we use only tweets in English, the Multilanguage model performs worse than English-Spanish Model and Spanish Model in classifying unrelated tweets.
-This seems to suggest that Multilanguage model is worse when it comes to classifying unrelated tweets, even when we use only tweets in English.
+In this translated subset, the coefficients still suggest weaker performance for the `Multilanguage` model than for the `English-Spanish` and `Spanish` models on `unrelated` content. That pattern is consistent with the idea that the performance gap is not driven only by the original tweet language.
 
 ```{r}
-model4_results <- tidy(logit_modelxlabel, conf.int = TRUE) %>%
-  filter(term != "(Intercept)",
-         term != "Train_TestTest",
-         !grepl("TranslationQuality", term),
-         !grepl("^Language", term)) %>%
-  mutate(
-    variable_group = case_when(
-      grepl("^Model", term) ~ "Model Type",
-      grepl("^label", term) ~ "Label Category", 
-      grepl("Train_Test", term) ~ "Data Split",
-      TRUE ~ "Other"
-    ),
-    # Extract components for clean label
-    model_label = case_when(
-      grepl("English-Spanish", term) ~ "English-Spanish",
-      grepl("Multilanguage", term) ~ "Multilingual",
-      grepl("Spanish", term) & variable_group == "Model Type" ~ "Spanish-Only",
-      TRUE ~ NA_character_
-    ),
-    label_class = case_when(
-      grepl("unrelated", term) ~ "Unrelated",
-      grepl("anti", term) ~ "Anti-Immigration",
-      grepl("pro", term) ~ "Pro-Immigration",
-      TRUE ~ NA_character_
-    ),
-    # Compose readable label (use × for clarity)
-    clean_term = case_when(
-      !is.na(model_label) & !is.na(label_class) ~ paste(model_label, "×", label_class),
-      !is.na(label_class) ~ label_class,
-      !is.na(model_label) ~ model_label,
-      TRUE ~ tools::toTitleCase(gsub("^Model|^label|^Language|^Train_Test|^TranslationQuality", "", term))
-    ),
-    significance = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01 ~ "**", 
-      p.value < 0.05 ~ "*",
-      TRUE ~ ""
-    ),
-    abs_estimate = abs(estimate)
-  ) %>%
-  arrange(variable_group, desc(abs_estimate))
+# fit the translation-only interaction model
+df_translation <- df %>%
+  filter(Translation == 1) %>%
+  droplevels()
+
+model4_formula <- if (nlevels(df_translation$Model) > 1) {
+  Correct ~ Model * label + Language + Train_Test + TranslationQuality
+} else {
+  Correct ~ label + Language + Train_Test + TranslationQuality
+}
+
+translated_label_glm <- glm(
+  model4_formula,
+  data = df_translation,
+  family = binomial()
+)
+
+summary(translated_label_glm)
+```
+
+```{r}
+# keep only the translated-sample terms needed for interpretation
+model4_results <- tidy_translation_label_terms(translated_label_glm)
 ```
 
 ```{r}
@@ -894,14 +479,11 @@ model4_plot1 <- model4_results %>%
   geom_point(size = 3, alpha = 0.9) +
   scale_color_manual(values = cb_palette, name = "Variable Group") +
   labs(
-    #title = "Logistic Regression Coefficients",
     subtitle = "Log-odds estimates with 95% confidence intervals",
     x = "Coefficient Estimates", y = NULL,
     caption = "Dashed line at zero indicates no effect"
   ) +
-  #theme_minimal(base_family = "Roboto Condensed") +
   theme(
-    #plot.title = element_text(size = 16, face = "bold"),
     plot.subtitle = element_text(size = 12, color = "grey40"),
     axis.text.y = element_text(size = 9),
     axis.text.x = element_text(size = 10),
@@ -913,7 +495,7 @@ model4_plot1 <- model4_results %>%
 ```
 
 ```{r}
-model4_plot2 <- model4_results %>%
+translated_label_coeff_plot <- model4_results %>%
   mutate(
     clean_term = fct_reorder(clean_term, estimate),
     variable_group = fct_reorder(variable_group, abs_estimate, .fun = median)
@@ -925,23 +507,20 @@ model4_plot2 <- model4_results %>%
   facet_wrap(~variable_group, scales = "free_y", ncol = 1, strip.position = "left") +
   scale_color_manual(values = cb_palette, guide = "none") +
   labs(
-    #title = "LLM x Label Interaction Coefficients",
     x = "Coefficient Estimates", y = NULL
   ) +
-  theme_minimal(base_family = "roboto_condensed") +
+  theme_minimal(base_family = base_family) +
   theme(
-    #plot.title = element_text(size = 16, face = "bold"),
-    #plot.subtitle = element_text(size = 12, color = "grey40"),
     strip.text = element_text(size = 11, face = "bold"),
     axis.text.y = element_text(size = 13),
     axis.text.x = element_text(size = 10),
     axis.title.x    = element_text(size = 14, margin = margin(t = 12)),
     panel.grid.minor = element_blank()
-    
   )
 
 # save the plot
-ggsave(filename = "model_label_interaction.png", plot = model4_plot2, path = "output", width = 10, height = 6, dpi = 300)
+ggsave(filename = "model_label_interaction.png", plot = translated_label_coeff_plot, path = output_dir, width = 10, height = 6, dpi = 300)
+translated_label_coeff_plot
 ```
 
 ```{r}
@@ -965,13 +544,9 @@ model4_plot3 <- model4_results %>%
                      name = "Significance",
                      labels = c("n.s.", "p < 0.05", "p < 0.01", "p < 0.001")) +
   labs(
-    #title = "Logistic Regression Coefficients with Significance Levels",
     x = "Log-odds (Coefficient Estimate)", y = NULL
   ) +
-  #theme_minimal(base_family = "Roboto Condensed") +
   theme(
-    #plot.title = element_text(size = 16, face = "bold"),
-    #plot.subtitle = element_text(size = 12, color = "grey40"),
     axis.text.y = element_text(size = 9),
     axis.text.x = element_text(size = 10),
     legend.position = "bottom",
@@ -993,13 +568,10 @@ model4_plot4 <- model4_results %>%
   scale_fill_manual(values = cb_palette, name = "Variable Type") +
   scale_color_manual(values = cb_palette, name = "Variable Type") +
   labs(
-   # title = "Model Performance: Share of Unrelated Classifications",
     x = "Coefficient Estimates", y = NULL
   ) +
-  theme_minimal(base_family = "roboto_condensed") +
+  theme_minimal(base_family = base_family) +
   theme(
-    #plot.title = element_text(size = 16, face = "bold"),
-    #plot.subtitle = element_text(size = 12, color = "grey40"),
     plot.caption = element_text(size = 9, color = "grey50", hjust = 0),
     axis.text.y = element_text(size = 9, color = "grey20"),
     axis.text.x = element_text(size = 10),
@@ -1008,89 +580,27 @@ model4_plot4 <- model4_results %>%
   )
 ```
 
-```{r}
-# print plots from model 4
-#print(model4_plot1)
-#print(model4_plot2)
-#print(model4_plot3)
-#print(model4_plot4)
-
-# save plots from model 4
-#mapply(function(plot, name) ggsave(filename = paste0(name, ".png"), plot = plot, path = "output", width = 10, height = 6, dpi = 300),
-#       list(model_label_plot1, model_label_plot1, model_label_plot1, model_label_plot1),
-#       paste0("model4_plot", 1:4))
-```
-
-
-Create heatmaps of Model 4 results across labels ana languages
+Create heatmaps of Model 4 results across labels and languages
 
 ```{r}
-# Define models, languages, and labels
+# build a language-by-model prediction table within translated observations
 languages <- c("Turkish", "Spanish", "Portuguese", "Polish", "Korean", "Italian",
                "Indonesian", "Hungarian", "Hindi", "German", "French", "Arabic")
-models <- c("English-Spanish", "Multilanguage", "Spanish", "English")
-labels <- c("Neutral", "Anti-immigration", "Pro-immigration", "Unrelated")
+df_plot_heatmap <- build_translation_heatmap_data(
+  model = translated_label_glm,
+  languages = languages,
+  translation_df = df_translation,
+  translation_quality = "Unknown"
+)
 
-# Set translation quality to a fixed level for prediction
-translation_val <- "Unknown"  # or use "Good", "Bad"
-
-# Get coefficients
-coefs <- coef(logit_modelxlabel)
-coef_names <- names(coefs)
-
-# Function to extract coefficient or return 0
-get_coef <- function(term) {
-  if (term %in% coef_names) return(coefs[term]) else return(0)
-}
-
-# Average language effect (approximate for 'LanguageEnglish')
-get_lang_coef <- function(language) {
-  term <- paste0("Language", language)
-  return(get_coef(term))
-}
-
-# Function to retrieve translation coefficient
-get_translation_coef <- function(quality) {
-  term <- paste0("TranslationQuality", quality)
-  return(get_coef(term))
-}
-
-# Main label effect
-get_label_coef <- function(label) {
-  if (label == "Neutral") return(0)
-  return(get_coef(paste0("label", gsub("-", "", label))))
-}
-
-# Model × Label interaction
-get_model_label_interaction <- function(model, label) {
-  term <- paste0("Model", model, ":label", gsub("-", "", label))
-  return(get_coef(term))
-}
-
-# Build full table of predictions
-df_plot_heatmap <- expand.grid(Language = languages, Model = models, Label = labels) %>%
-  rowwise() %>%
-  mutate(
-    intercept = get_coef("(Intercept)"),
-    model_coef = get_coef(paste0("Model", Model)),
-    label_coef = get_label_coef(Label),
-    model_label_interaction = get_model_label_interaction(Model, Label),
-    language_coef = get_lang_coef(Language),
-    test_coef = get_coef("Train_TestTest"),
-    translation_coef = get_translation_coef(translation_val),
-    total_eta = intercept + model_coef + label_coef + model_label_interaction + language_coef + translation_coef + test_coef,
-    Accuracy = 1 / (1 + exp(-total_eta))
-  ) %>%
-  ungroup()
-
-# Plot
+# plot the heatmap
 ggplot(df_plot_heatmap, aes(x = Model, y = Language, fill = Accuracy)) +
   geom_tile(color = "white") +
   geom_text(
     aes(label = sprintf("%.1f", Accuracy * 100)),
     size = 3.2,
-    family = "roboto",
-    color = "white" # change color of the text
+    family = base_family,
+    color = "white"
   ) +
   facet_wrap(~Label, ncol = 2) +
   scale_fill_viridis(
@@ -1103,7 +613,6 @@ ggplot(df_plot_heatmap, aes(x = Model, y = Language, fill = Accuracy)) +
     x = NULL,
     y = NULL
   ) +
-  #theme_minimal(base_size = 12, base_family = "roboto") +
   theme(
     legend.position = "right",
     strip.text = element_text(face = "bold"),
@@ -1112,33 +621,17 @@ ggplot(df_plot_heatmap, aes(x = Model, y = Language, fill = Accuracy)) +
     axis.title = element_blank(),
     plot.title = element_text(face = "bold", size = 14, margin = margin(b = 10))
   )
-
-# Save the plot
-#ggsave(filename = "predicted_accuracy_by_labels_language.png", plot = last_plot(), path = 'output', width = 12, height = 8,dpi = 300)
 ```
 
-Translated only observation analysis
-```{r}
-# select only tweets classified based on the translation
-df_translation <- df %>%
-  filter(Translation == 1)
-
-# Fit the logistic regression model
-#logit_modelxlabel <- glm(Correct ~ Model*label + Language + Train_Test + TranslationQuality, # add Translated not Translated and Translated(0,1)*TranslationQuality(unknown, bad, good)  
-#                   data = df_translation, 
-#                   family = binomial())
-
-# Summarize the model
-#summary(logit_modelxlabel)
-```
+### Model 5
 
 Understand how pretraining impacts accuracy performances
 ```{r}
-# create log of LangShare
+# create the logged language share
 df$LogLangShare <- log1p(df$LangShare)
 
-# Model 5 - Interactions Model and Language Share from LLAMA 2
-logit_model_interact <- glm(Correct ~ Model*LangShare + Language + label + Train_Test + TranslationQuality + label,
+# fit the logistic regression model
+logit_model_interact <- glm(Correct ~ Model * LangShare + Language + label + Train_Test + TranslationQuality + label,
                             data = df,
                             family = binomial())
 
@@ -1146,7 +639,7 @@ summary(logit_model_interact)
 ```
 
 ```{r}
-# convert Correct to numeric
+# convert the outcome to numeric
 df$Correct_Num <- as.numeric(as.character(df$Correct))
 
 lang_summary <- df %>%
@@ -1156,16 +649,14 @@ lang_summary <- df %>%
 ```
 
 ```{r}
-# Show relationship between accuracy and share of language in pretraining phase in LLAMA
-# create summary table removing unrelated and English tweets
+# summarise accuracy by language share
 df_summary <- df %>%
-  # remove obs where Language is English
   filter(Language != "English") %>%
   filter(label != "unrelated") %>%
   group_by(Language, Model, LangShare) %>%
   summarise(accuracy = mean(Correct_Num), .groups = "drop")
 
-# plot accuracy by Language and Model
+# plot accuracy by language and model
 ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
   geom_point() +
   geom_smooth(method = "lm") +
@@ -1173,38 +664,34 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Model)) +
        x = "Language Share in Pretraining (%)",
        y = "Mean Accuracy") +
   theme_minimal()
-
-# save the plot in  folder
-#ggsave(file.path(output_dir, "accuracy_by_language_share.png"), width = 10, height = 6)
 ```
 
 ```{r}
-# Step 1: Summarize and order Language by mean LangShare
+# order languages by mean language share
 language_order <- df_summary %>%
   group_by(Language) %>%
   summarise(mean_share = mean(LangShare), .groups = "drop") %>%
   arrange(mean_share) %>%
   pull(Language)
-# Step 2: Set Language as ordered factor
+
 df_summary$Language <- factor(df_summary$Language, levels = language_order)
 ```
 
 
 ```{r}
-# Plot
+# plot model 5 summaries
 ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Language)) +
   geom_point(size = 2) +
   geom_smooth(method = "lm", se = FALSE, color = "black", aes(group = 1)) +
   facet_wrap(~ Model) +
   labs(
-    #title = "Accuracy vs Language Share by Model",
     x = "Share of Language in LLAMA Pretraining",
     y = "Mean Accuracy",
     color = "Language"
   ) +
   theme_minimal(base_size = 16) +
   theme(
-    text = element_text(family = "roboto_condensed"),
+    text = element_text(family = base_family),
     axis.title = element_text(size = 18),
     axis.text = element_text(size = 14),
     legend.title = element_text(size = 16),
@@ -1212,12 +699,13 @@ ggplot(df_summary, aes(x = LangShare, y = accuracy, color = Language)) +
     strip.text = element_text(size = 14),
     axis.title.x = element_text(margin = margin(t = 15))
   )
-# save the plot in output folder
+
+# save the plot
 ggsave(file.path(output_dir, "accuracy_vs_language_share_by_model.png"), width = 10, height = 6)
 ```
 
 ```{r}
-# Get linear model coefficients per model
+# summarise model 5 slopes
 coefficients_table <- df_summary %>%
   group_by(Model) %>%
   do(tidy(lm(accuracy ~ LangShare, data = .))) %>%
@@ -1227,187 +715,70 @@ coefficients_table <- df_summary %>%
 print(coefficients_table)
 ```
 
-#### Confusion Matrix and Confidence Intervals
+## Confusion Matrix and Confidence Intervals
 ```{r}
-# Filter out translation data and separate train/test sets
+# split the non-translation data
 df_non_translation <- df %>% filter(Translation == 0)
 
 df_test <- df_non_translation %>% filter(Train_Test == "Test")
 df_train <- df_non_translation %>% filter(Train_Test == "Train")
 ```
 
-```{r}
-# Function to calculate accuracy and 95% CI
-compute_accuracy_ci <- function(data) {
-  cm <- confusionMatrix(as.factor(data$label_llama), as.factor(data$label))
-  accuracy <- cm$overall["Accuracy"]
-  ci <- prop.test(cm$table %>% diag() %>% sum(), sum(cm$table))$conf.int
-  return(tibble(
-    Accuracy = accuracy,
-    Accuracy_Lower = ci[1],
-    Accuracy_Upper = ci[2]
-  ))
-}
-```
 
 ```{r}
-# Helper function to apply to each dataset split
-generate_accuracy_df <- function(df_split, dataset_name) {
-  df_split %>%
-    group_by(Model, Language) %>%
-    group_map(~{
-      acc <- compute_accuracy_ci(.x)
-      acc$Model <- .y$Model
-      acc$Language <- .y$Language
-      acc$Dataset <- dataset_name
-      acc
-    }) %>%
-    bind_rows()
-}
-```
-
-```{r}
-generate_and_save_cm <- function(data, title) {
-  models <- unique(data$Model)
-  results <- list()
-
-  for (model in models) {
-    model_data <- data[data$Model == model, ]
-
-    # Compute overall confusion matrix
-    cm <- confusionMatrix(as.factor(model_data$label_llama), as.factor(model_data$label))
-    cm_matrix <- as.matrix(cm$table)
-
-    # Output file path
-    filename <- paste0("output/confusion_matrix_", model, "_", title, ".csv")
-
-    # Write confusion matrix to file
-    write.csv(cm_matrix, filename, row.names = TRUE)
-
-    # Prepare summary rows (language-level misclassification)
-    languages <- unique(model_data$Language)
-    model_summary <- list()
-
-    for (lang in languages) {
-      lang_data <- model_data[model_data$Language == lang, ]
-      total_pro <- sum(lang_data$label == "pro-immigration")
-      total_anti <- sum(lang_data$label == "anti-immigration")
-      total_tweets <- nrow(lang_data)
-
-      pro_as_anti <- sum(lang_data$label == "pro-immigration" & lang_data$label_llama == "anti-immigration")
-      anti_as_pro <- sum(lang_data$label == "anti-immigration" & lang_data$label_llama == "pro-immigration")
-
-      model_summary[[lang]] <- tibble(
-        Model = model,
-        Dataset = title,
-        Language = lang,
-        Tweets = total_tweets,
-        Pro_as_Anti_Count = pro_as_anti,
-        Pro_as_Anti_Perc = ifelse(total_pro > 0, round(100 * pro_as_anti / total_pro, 2), NA),
-        Anti_as_Pro_Count = anti_as_pro,
-        Anti_as_Pro_Perc = ifelse(total_anti > 0, round(100 * anti_as_pro / total_anti, 2), NA)
-      )
-    }
-
-    # Combine language-level summaries
-    summary_df <- bind_rows(model_summary)
-
-    # Append empty lines, then summary to the same CSV
-    write("\n\nLanguage-Level Misclassification Summary:\n", file = filename, append = TRUE)
-    suppressMessages(write.table(summary_df, file = filename, sep = ",", row.names = FALSE, append = TRUE, col.names = TRUE))
-
-    # Add to final return object
-    results[[model]] <- summary_df
-  }
-
-  bind_rows(results)
-}
-```
-
-
-```{r}
-# Generate accuracy stats for both datasets
+# generate accuracy statistics
 accuracy_test <- generate_accuracy_df(df_test, "Test")
 accuracy_train <- generate_accuracy_df(df_train, "Train")
-
-# combine into one dataframe
-#accuracy_data <- bind_rows(accuracy_test, accuracy_train)
 ```
 
 ```{r}
-# save confusion matrix dataset
-generate_and_save_cm(df_test, "Test")
-generate_and_save_cm(df_train, "Train")
+# save confusion matrix outputs
+generate_and_save_cm(df_test, "Test", output_dir)
+generate_and_save_cm(df_train, "Train", output_dir)
 ```
 
 ```{r}
-# dynamic title for the chart
-chart_title <- paste("Accuracy Confidence Intervals for", dataset, "Dataset")
-
-# function to create accuracy confidence interval plots
-plot_accuracy_intervals <- function(data, title) {
-  ggplot(data, aes(x = Language, ymin = Accuracy_Lower, ymax = Accuracy_Upper, color = Model, fill = Model)) +
-    geom_errorbar(width = 0.3, position = position_dodge(width = 0.6)) +
-    geom_point(aes(y = (Accuracy_Lower + Accuracy_Upper) / 2), size = 3, position = position_dodge(width = 0.6)) +
-    scale_x_discrete(labels = function(x) ifelse(x %in% names(language_map), language_map[[x]], x)) +
-    labs(title = title,
-         x = "Language",
-         y = "Accuracy Confidence Interval",
-         color = "Model",
-         fill = "Model") +
-    theme_minimal() +
-    theme(legend.position = "bottom",
-          panel.background = element_rect(fill = "white", color = NA),
-          plot.background = element_rect(fill = "white", color = NA),
-          legend.title = element_text(size = 12, face = "bold"),
-          legend.text = element_text(size = 10),
-          axis.text.x = element_text(angle = 45, hjust = 1))
-  
-  # save the plot
-  ggsave(filename = paste0(chart_title, ".png"),
-         path = 'output',
-         width = 10, height = 6, dpi = 300)
-}
-
-```
-
-```{r}
-# plot 'Test' set confidence inervals
+# plot test intervals
 chart_title <- "Accuracy Confidence Intervals by Language and Dataset (Test)"
-plot_accuracy_intervals(accuracy_test, chart_title)
+plot_accuracy_intervals(accuracy_test, chart_title, output_dir)
 ```
 
 ```{r}
-# plot 'Train' set confidence inervals
+# plot train intervals
 chart_title <- "Accuracy Confidence Intervals by Language and Dataset (Train)"
-plot_accuracy_intervals(accuracy_train, chart_title)
+plot_accuracy_intervals(accuracy_train, chart_title, output_dir)
 ```
 
-#### Multilevel Models
+## Multilevel Models
 ```{r}
-library(lme4)
-
-# Multilevel logistic regression
+# fit the multilevel logistic regression
 logit_mixed <- glmer(Correct ~ Model * Language + label + Train_Test + TranslationQuality + 
              (1 | Language), 
-      data = df, family = binomial())
+      data = df,
+      family = binomial(),
+      nAGQ = 0,
+      control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 10000)))
 
-# Summarize the model
+# summarise the model
 summary(logit_mixed)
 ```
 ```{r}
-# Multilevel logistic regression with random slopes
+# fit the random slope multilevel model
 multilevel_interaction <- glmer(Correct ~ Model + label + Train_Test + TranslationQuality + 
              (1 + Model | Language), 
-      data = df, family = binomial())
+      data = df,
+      family = binomial(),
+      nAGQ = 0,
+      control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 10000)))
 
 summary(multilevel_interaction)
 
 ```
 
-##### Random Forest
+## Random Forest
 ```{r}
-tree <- rpart(Correct ~ Model + Language + Train_Test + TranslationQuality + label, # add TrainSize
-                         data = df)
+# fit the random forest style tree model
+tree <- rpart(Correct ~ Model + Language + Train_Test + TranslationQuality + label,
+              data = df)
 rpart.plot(tree, yesno = 2)
 ```
